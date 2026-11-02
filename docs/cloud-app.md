@@ -459,7 +459,7 @@ it per project):
 
 | Data | Default | Why |
 |---|---|---|
-| Raw lossless audio | **3 years** after deployment end; hot for 3 months, then cold storage | Covers YVA and Natura decisions and typical appeal periods in administrative court; cold storage keeps it cheap (≈ €20–40 per station-deployment) |
+| Raw lossless audio | **5 years** after the project ends (as in requirements doc), with a reminder before deletion; hot for 3 months, then cold storage | Covers YVA and Natura decisions and appeal periods with margin; cold storage keeps it cheap (≈ €35–65 per station-deployment) |
 | Compressed live stream | 3 months | Only a working copy; the lossless original replaces it |
 | Detections, reviews, reports, audit log | As long as the account exists | Small, and needed to defend results |
 | Telemetry | 2 years | For warranty and fault analysis |
