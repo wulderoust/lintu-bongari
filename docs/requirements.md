@@ -96,7 +96,9 @@ The goal: for any species claim in a report, anyone can follow it back to the ex
 
 - **REQ-I1 (MUST)** Every audio file and its metadata get a SHA-256 hash on the station at the moment the file is closed.
 - **REQ-I2 (MUST)** The station signs a manifest of file hashes with a device private key kept in a secure element. Manifests are chained (each includes the hash of the previous one), so a missing or altered file is detectable.
-- **REQ-I3 (MUST)** Upload is verified end to end: the cloud recomputes the hash and only then marks the file as received. The station deletes its local copy only after this confirmation.
+- **REQ-I3 (MUST)** Signed manifests (REQ-I2) and status go to the cloud continuously, within an hour of each file closing when 4G is available. This fixes each file's hash in the cloud long before the audio itself arrives, so audio collected later can still be proven unchanged.
+- **REQ-I7 (MUST)** Audio reaches the cloud in tiers, because uploading every channel over 4G is not affordable in power or data (about 35 GB per station per day for 4 channels at 48 kHz/24 bit). Tier 1: one reference channel uploads by default for species ID. Tier 2: the full multichannel archive uploads only when power and coverage allow, or on request for selected time windows. Tier 3: the station's SD cards are the archive of record and are collected at service visits.
+- **REQ-I8 (MUST)** Every file that reaches the cloud, by 4G or from an SD card, is accepted only after its recomputed hash matches the signed manifest already in the cloud. Mismatches and files missing from the manifest are flagged, not silently accepted. The station never deletes audio it has not had confirmed this way.
 - **REQ-I4 (MUST)** Original audio in the cloud is stored write-once (object lock or equivalent) for the agreed retention period. Any derived file (filtered, redacted, clipped) records the hash of its source.
 - **REQ-I5 (MUST)** Append-only audit log of everything that happens to the data: uploads, analyses, human reviews, edits, exports, deletions, access to raw audio. Each entry has who, what, when.
 - **REQ-I6 (SHOULD)** A report export includes a verification package: manifest, hashes, model versions, and audit log extract, so a third party can check it.
@@ -127,7 +129,7 @@ The stations record everything they hear, including people. In Finland this touc
 
 ### 5.2 Requirements
 
-- **REQ-P1 (MUST)** Human speech detection runs on all audio. Segments with speech are hidden from normal listening and from shared exports by default. Only users with a raw audio role can open them, and every such access is logged (REQ-I5).
+- **REQ-P1 (MUST)** Human speech detection runs on all audio as it reaches the cloud or the user's computer (tier 1 first, the full archive when it arrives). Segments with speech are hidden from normal listening and from shared exports by default. Only users with a raw audio role can open them, and every such access is logged (REQ-I5).
 - **REQ-P2 (MUST)** Redaction never breaks the chain of custody: the original keeps its hash and write-once status, the redacted copy is a derived file that refers to it (REQ-I4). Policy option: delete the original speech segments after a set period while keeping a record that they were deleted, when and why.
 - **REQ-P3 (MUST)** Guidance and a ready-made sign for the site ("Lintujen äänitallennin / Bird sound recorder", controller contact, purpose), since people in the area must be informed (GDPR Art. 13/14). Hobbyist guidance warns against placing stations aimed at yards, homes or other private spaces.
 - **REQ-P4 (MUST)** Landowner permission is part of the deployment record (REQ-L2). Everyman's rights do not cover leaving equipment in place for weeks.
@@ -140,7 +142,7 @@ The stations record everything they hear, including people. In Finland this touc
 These are summarised here because they decide whether data exists at all. The hardware and edge software documents set the detailed specs.
 
 - **REQ-O1 (MUST)** Unattended operation for 28 days with continuous recording on all channels, in temperatures from -30 °C to +35 °C, through snow, rain and icing. Data loss from a full battery or storage must not happen silently.
-- **REQ-O2 (MUST)** Station keeps recording when 4G is down and catches up uploads when the connection returns. Local storage holds the whole deployment's audio as a fallback.
+- **REQ-O2 (MUST)** Station keeps recording when 4G is down and catches up manifest, status and tier 1 uploads when the connection returns. Local storage holds the whole deployment's full multichannel audio, since the SD cards are the archive of record (REQ-I7).
 - **REQ-O3 (MUST)** Remote status at least every hour when connected: recording state, battery, storage, temperature, GNSS lock, microphone health, last upload.
 - **REQ-O4 (MUST)** Remote configuration changes (schedule, gain) are logged in the audit log and take effect at a recorded time, so effort stays traceable.
 - **REQ-O5 (MUST)** One project can include from 1 to at least 20 stations, managed together, with results shown per station and combined.
@@ -149,7 +151,7 @@ These are summarised here because they decide whether data exists at all. The ha
 
 1. Three stations run 28 days at a real site, at least one deployment period below 0 °C.
 2. Recorded effort is 95% or more of scheduled time, and every gap is explained in the log.
-3. Every file in a sample of 100 traces from report to original audio with matching hashes.
+3. Every file in a sample of 100 traces from report to original audio with matching hashes, including files recovered from SD cards at the service visit and checked against manifests uploaded during the deployment.
 4. GNSS timing check: a test sound recorded by all microphones shows inter-channel error within REQ-T2.
 5. Model results for the pilot agree with an expert's review on a random sample, and precision per common species is reported.
 6. A hobbyist-level tester deploys a station from the guide alone in under 30 minutes.
