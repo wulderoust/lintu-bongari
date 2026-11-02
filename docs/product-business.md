@@ -25,7 +25,7 @@ working assumptions to be replaced once the hardware BOM and cloud costs are kno
 | Data ownership | **The customer owns the data** | We act only as processor; full export and delete; desktop-only option (section 4) |
 | Polar night (Lapland) | Not in v1; a later version | v1 is specified for southern and central Finland; in midwinter it still runs mostly on battery |
 | Battery weight | 17 kg per station accepted, smaller preferred | Kit weight and shipping by road, not air |
-| Kit price | €6-8k is "somewhere there" | **Conflicts with parts cost; see section 6 and the open decision** |
+| Kit price | €6-8k is "somewhere there" | Conflicted with parts cost; walto chose **design to cost: €9-12k kit** (section 6) |
 
 ---
 
@@ -180,8 +180,8 @@ revisited later if pilots show consultants want it.
 | Tier | Who | Hardware | Subscription (incl. 4G data, cloud ID, storage) | Notes |
 |---|---|---|---|---|
 | **Kotipiha / Home** (phase 2) | Hobbyists | 1 station **€390-490** (est.) | **€6-10 / month** | Simplified station (maybe Wi-Fi or 4G), app, species lists, laji.fi sharing |
-| **Pro station** (add-on) | Researchers, extending a kit | **€3,500-5,000** per station incl. solar (est., see below) | **€25-40 / station / month** while deployed | Full multi-mic, raw audio, exports, API |
-| **Localization kit** (base product) | Consultants, researchers | 4 stations + solar panels + batteries + mounts + case: **see price problem below** | **€100-160 / month** for the kit while active | Individual counts/territory maps, report templates, verification tools, priority support |
+| **Pro station** (add-on) | Researchers, extending a kit | **€2,200-3,000** per station incl. solar (target) | **€25-40 / station / month** while deployed | Full multi-mic, raw audio, exports, API |
+| **Localization kit** (base product) | Consultants, researchers | 4 stations + solar panels + batteries + mounts + case **€9,000-12,000** (target) | **€100-160 / month** for the kit while active | Individual counts/territory maps, report templates, verification tools, priority support |
 | **Desktop licence** | Researchers who will not use the cloud | Any | **€300-600 / year** (est.) | Analysis runs on their computer; no audio leaves their control |
 
 Subscription is billed only while stations are deployed ("active months"), which fits seasonal use.
@@ -202,9 +202,12 @@ Small-volume professional electronics usually sell at **2.5-4x parts cost**. Opt
 | **B. Design to cost** | **€9,000-12,000** (est.) | Target parts **€700-900 per station**: cheaper battery (LiFePO4 for summer, LTO as winter add-on), 1 TB storage, fewer shared items, volume pricing. Requires changes in the hardware design during step 2. |
 | **C. Both** | Launch at A, move to B | Pilots and first customers on the full design at price A; a cost-reduced v2 brings the price down. |
 
-**Recommendation: C.** Quality and trust come first (walto's rule), the first customers are
-professionals who value data over price, and a lower price can follow once real BOM and volume
-are known. The €6-8k target is reachable only after cost reduction and at higher volume.
+**Decision (walto, 2026-11-02): B, design to cost.** Target kit price **€9,000-12,000**, which
+means parts of about **€700-900 per station** plus shared items. This is a requirement on the
+hardware design in step 2. Quality claims (winter operation, localization accuracy, data
+integrity) must not be traded away; savings should come from battery sizing and chemistry options,
+storage size, shared kit items and volume pricing. If step 2 shows the target cannot be met
+without hurting those claims, the price is revisited rather than the quality.
 
 ### Other running costs (est.)
 - 4G data: with continuous recording, the hardware/edge plan uploads one reference channel in FLAC
@@ -304,9 +307,7 @@ hand, sensible defaults for Finnish seasons (spring migration, breeding, autumn,
 
 Answered on 2026-11-02: see section 0. Still open:
 
-1. **Kit price vs parts cost** (section 6): price by real cost (~€16-22k), redesign for cost
-   (~€9-12k), or launch at the first and move to the second (recommended)?
-2. Will you form an **Oy** before the first sale (section 5a)?
+1. Will you form an **Oy** before the first sale (section 5a)?
 
 ---
 
