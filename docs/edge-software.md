@@ -1,315 +1,333 @@
 # Edge software design (on-station)
 
-Status: **Draft for step 1 (design)**. No code yet. Requirement IDs (REQ-…) refer to `docs/requirements.md` (PR #1); see §17 for traceability. Decisions marked **[Proposed]** need walto's review; items marked **[Open]** are waiting on answers or on the Hardware / Requirements docs.
+Status: **Draft for step 1 (design)**. No code yet. Decisions marked **[Proposed]** need walto's review; items marked **[Open]** are waiting on answers or on another doc. Requirement IDs (REQ-…) refer to `docs/requirements.md` (PR #1). Hardware references (§x.y of hardware) refer to `docs/hardware.md` (PR #5). See §18 for traceability.
+
+This version follows the hardware doc's **architecture B**: a low-power recorder MCU records around the clock, and a Linux module wakes only when needed. Prototype v0 is architecture A (Linux records everything), and the software is split so that v0 work carries over (§16).
 
 ## 1. Scope and principles
 
-This document covers the software that runs on each recording station: capturing multi-channel audio, deciding when to record, flagging acoustic activity, keeping time, storing data with an audit trail, uploading over 4G, reporting health, and taking remote config and updates.
+This document covers the software and firmware on each recording station: capturing multi-channel audio, deciding when to record, flagging acoustic activity, keeping time, storing data with an audit trail, uploading over 4G, reporting health, and taking remote config and updates.
 
-Out of scope here: species identification (runs in the cloud or on the user's computer), the cloud backend and app, and the electronics themselves (Hardware doc).
+Out of scope: species identification (cloud or the user's computer), the cloud backend and app, and the electronics (hardware doc).
 
-Design principles, in priority order:
+Principles, in priority order:
 
-1. **Never lose or silently corrupt a recording.** Data is the product, and it may be used as evidence in regulatory work. Every file is checksummed, logged, and traceable from microphone to cloud.
-2. **Survive unattended for 2-4 weeks in any Finnish season.** Assume power cuts, -30 °C, no 4G for days, and nobody on site.
-3. **Degrade gracefully.** Low battery or no network reduces what we do, in a predictable order. It never crashes the station.
-4. **Easy for the buyer.** Field setup is "mount, power on, scan QR". Everything else is remote.
-5. **Recoverable remotely.** Any software fault can be fixed without a site visit (watchdogs, A/B updates, rollback).
+1. **Never lose or silently corrupt a recording.** Data is the product and may be evidence in regulatory work. Every file is hashed, signed into a chain, and traceable from microphone to cloud.
+2. **Recording never depends on Linux or 4G.** The recorder MCU keeps recording if the Linux module, the modem or the network fails.
+3. **Survive unattended for 28 days in any Finnish season** (REQ-O1). Assume power cuts, -30 °C, no 4G for days, and nobody on site.
+4. **Degrade gracefully and visibly.** Low battery or no network reduces what we do in a fixed order, every step is logged, and effort records show it (REQ-C2).
+5. **Easy for the buyer, recoverable remotely.** Field setup is "mount, power on, scan QR". Any software fault can be fixed without a site visit.
 
 ## 2. System overview
 
+Three processors, each with one job (hardware §5):
+
+| Processor | Always on? | Software | Job |
+|---|---|---|---|
+| **Recorder MCU** (STM32H733/H735) | Yes | `rec-fw`, C on Zephyr | TDM capture from 2 ADCs, FLAC encoding, SHA-256, signed manifest chain, write to SD archive, per-minute audio health summaries. |
+| **Supervisor MCU** (STM32L4 + RTC) | Yes, a few mW | `sup-fw`, C on Zephyr | Power switches, watchdog for everything, battery/temperature/heaters, hourly status via the modem's built-in MQTT, wake schedule for Linux. |
+| **Linux module** (Raspberry Pi CM4) | No, ~2 h/day | Rust daemons on Linux | Uploads, event detection over the backlog, remote config, OTA for all three processors, remote support sessions. |
+
 ```
-             ┌────────────────────── Station ───────────────────────┐
- Mics ──► ADC (TDM) ──► recorder ──► segment files (FLAC) ──► store/ledger
- (4ch)          ▲          │                                     │
- GNSS PPS ──────┘          ▼                                     ▼
- (spare channel)        detector ──► event index ──────────► uploader ──► 4G ──► Cloud
-                                                                 ▲
-  scheduler ── decides when recorder/modem/uploader run          │
-  telemetry ── health metrics ───────────────────────────────────┤
-  config-agent ◄── desired config ◄──────────────────────────────┤
-  RAUC (OTA) ◄── signed bundles ◄────────────────────────────────┘
-  supervisor MCU ── power, RTC, watchdog, battery, heater, wakes SoC
-             └───────────────────────────────────────────────────────┘
+ Mics (4-6) ─► 2x ADC6140 (TCXO) ─TDM─► Recorder MCU ─► SD A / SD B (archive of record)
+ GNSS PPS ───► ADC ch 8                   │  SHA-256, signed chain (secure element)
+ GNSS PPS/NMEA ──────────────────────────►│
+                                          │ UART/SPI: status, manifests, config
+ Supervisor MCU ◄──────────────────────────┘
+   │ power switches, watchdog, wake timer, modem ring line
+   ├─► 4G modem ── hourly status (modem's own MQTT, Linux off) ──► Cloud
+   └─► Linux module (on demand) ── reads closed files from idle SD ── uploads ──► Cloud
 ```
 
-Two processors **[Proposed, pending Hardware doc]**:
-
-- **Linux SoC** (main computer): recording, compression, detection, storage, upload, OTA.
-- **Supervisor MCU** (always on, a few mW): owns the power rails, RTC, hardware watchdog, battery/solar monitoring, heater control, and wakes or power-cycles the SoC and modem. It can hard-reset a hung Linux or modem, which is what makes 4-week unattended runs safe.
+Key consequence: the always-on part is small, deterministic firmware. Everything complex (TLS uploads, detection, updates, VPN) lives in Linux, which is allowed to crash, be rebooted, or be off for days without losing a sample.
 
 ## 3. OS and stack [Proposed]
 
-| Layer | Prototype (step 3) | Product (step 4) |
+| Layer | Prototype v0 (architecture A) | Product (architecture B) |
 |---|---|---|
-| Compute | Raspberry Pi CM4 or CM5 on a carrier board | Same, unless Hardware doc picks a lower-power SoC (e.g. i.MX8M Mini, STM32MP2) |
-| OS | Raspberry Pi OS Lite (Debian) 64-bit | Yocto-built minimal Linux, read-only rootfs |
-| Updates | RAUC A/B from the start | RAUC A/B, signed bundles |
-| Init / supervision | systemd (watchdog, restart policies) | same |
-| Core daemons | **Rust** | Rust |
-| Tooling, tests, field scripts | Python | Python (dev only, not on device in product) |
-| Local catalog & queue | SQLite (WAL mode) | same |
-| Time | chrony + gpsd with PPS | same |
-| Cellular | ModemManager + NetworkManager | same |
-| Telemetry / control channel | MQTT over TLS (mutual auth) | same |
-| Remote support shell | WireGuard tunnel, opened on demand | same |
-| Supervisor MCU firmware | C with Zephyr RTOS | same |
+| Recording | `lb-recorder` on the CM4 (Rust, ALSA) | `rec-fw` on STM32H7 (C, Zephyr) |
+| Supervisor | lab supply, no supervisor | `sup-fw` on STM32L4 (C, Zephyr) |
+| Linux OS | Raspberry Pi OS Lite 64-bit | Yocto minimal image, read-only rootfs |
+| Linux daemons | Rust | Rust (same code) |
+| Linux updates | RAUC A/B | RAUC A/B, signed bundles |
+| MCU updates | n/a | MCUboot dual-slot, signed images, installed by Linux |
+| Local catalog & queue (Linux) | SQLite, WAL mode | same |
+| Time on Linux | chrony + gpsd with PPS | same, but recorder time is authoritative (§7) |
+| Cellular | ModemManager + NetworkManager | same, plus modem's built-in MQTT used by the supervisor |
+| Control channel | MQTT over TLS, mutual auth | same |
+| Remote support shell | WireGuard, on demand | same |
+| Tooling and tests | Python | Python (dev only) |
 
-Why these:
+Why:
 
-- **Linux** because multi-channel TDM audio, FLAC/Opus encoders, a cellular stack, TLS, and an A/B updater all exist and are proven there. Writing all of that on a bare MCU would cost months and still be less robust.
-- **Raspberry Pi first** because walto can get it running fast and the ecosystem is huge. Moving to Yocto later gives a small, reproducible, read-only image for the sold product. The daemons do not change between the two.
-- **Rust** for the daemons that run for weeks: memory safety, no garbage collector pauses during audio capture, low CPU (which is low power), single static binaries that are simple to ship in OTA bundles.
-- **RAUC** for updates: mature, A/B with automatic fallback, signed bundles, works on both Raspberry Pi OS and Yocto. Mender is the main alternative; RAUC has no server lock-in.
-- **SQLite** as the single local source of truth for files, events, upload state and the ledger. It survives power loss when used in WAL mode with `synchronous=FULL`.
+- **Zephyr on both MCUs:** one RTOS, one build system, STM32 drivers for SAI, SDMMC, HASH and UART, and MCUboot built in for safe firmware updates. Fallback if the SAI/TDM driver is not good enough on the bench: ST HAL + FreeRTOS for `rec-fw` only.
+- **C for MCU firmware** because that is what Zephyr, ST's drivers and walto's existing skills share. Rust (Embassy) is a possible later move for `rec-fw`, not for v1.
+- **Rust for Linux daemons:** memory safety, low CPU (= less energy in the short wake windows), single static binaries in OTA bundles. Written once in v0 and kept in the product.
+- **Yocto + RAUC** for the product: small, reproducible, read-only image with A/B fallback. v0 uses Raspberry Pi OS to get started fast; the daemons do not change.
 
 ## 4. Software components
+
+### 4.1 Recorder MCU (`rec-fw`)
+
+- **Capture:** SAI in TDM mode reads 8 slots from the two ADC6140s into a DMA double buffer (~2 s of audio in RAM). Overruns are counted and logged as explicit gaps with exact sample counts.
+- **Encode:** a small fixed-predictor FLAC encoder (fixed orders 0-4, Rice coding, 4096-sample blocks). This gets close to libFLAC's default compression at a fraction of the CPU, and the output is standard FLAC. Real-time 6-8 channels at 48 kHz/24-bit on an H7 must be proven on the bench (hardware risk list). Fallback: write 24-bit WAV and let Linux transcode, at the cost of ~1.5x storage.
+- **Files:** one multi-channel FLAC per segment (default 10 min, UTC-aligned), plus a sidecar (§5.2).
+- **Hash and sign:** SHA-256 on the HASH peripheral while writing; at file close, a manifest entry is appended to the chain and signed by the secure element (§10).
+- **Health:** per-channel, per-minute RMS, noise floor in a few bands, peak, clipping count, DC offset (§8.1). Cheap, computed on the capture buffers.
+- **Commands:** over UART/SPI from the supervisor and Linux: get status, get manifests, set config at next segment boundary, start self-test chirp, switch archive card, enter firmware update.
+
+### 4.2 Supervisor MCU (`sup-fw`)
+
+- Watchdog for recorder, Linux module and modem; power-cycles any that stops answering, and logs why.
+- Battery, solar, temperatures, humidity, heater control (hardware §3.3, §7).
+- **Hourly status** (REQ-O3) through the modem's built-in TCP/MQTT stack with Linux off.
+- **Wake logic:** boots Linux on the schedule table, on a cloud wake request (modem ring line, SMS or MQTT message), or when the upload backlog or a fault needs it. Pre-heats before booting Linux in the cold.
+- **Power degradation** steps (§6.3).
+
+### 4.3 Linux module services
 
 Each is a systemd service with `WatchdogSec=` and restart limits.
 
 | Service | Job |
 |---|---|
-| `lb-recorder` | Captures all channels from ALSA, writes fixed-length FLAC segments, writes per-segment metadata, records the PPS-to-sample alignment. |
-| `lb-detector` | Reads finished segments, computes activity/noise features, writes an event index. No species ID. |
-| `lb-store` | Hashes, catalogs and ledgers every file; enforces retention and disk-full policy; verifies integrity in the background. |
-| `lb-uploader` | Prioritised, resumable, budgeted uploads over 4G; manages modem on/off windows with the scheduler. |
-| `lb-scheduler` | Computes recording windows (sun-based, fixed, duty-cycle) and power-aware degradation; tells the supervisor when to wake next. |
-| `lb-telemetry` | Collects health metrics and sends them over MQTT; raises alerts. |
-| `lb-config` | Receives, validates and atomically applies remote config, with rollback. |
-| `lb-setup` | First-boot and field-setup flow (QR pairing, self-test). |
-| RAUC + `lb-health` | OTA install and post-update health check that marks the new slot good or rolls back. |
-| `supervisor-fw` | MCU firmware: power, RTC, watchdog, battery, heater, wake timer. Talks to the SoC over UART or I²C. |
+| `lb-recorder` | **v0 only:** records via ALSA exactly as `rec-fw` will (same file format, sidecar and chain). In the product it becomes a test tool that checks `rec-fw` output. |
+| `lb-ingest` | Reads closed files and manifest entries from the idle SD card, verifies each hash against the chain, and catalogs them in SQLite. |
+| `lb-detector` | Event detection over newly ingested audio (§8.2). No species ID. |
+| `lb-uploader` | Prioritised, resumable, budgeted uploads (§9). |
+| `lb-scheduler` | Computes the next 7 days of recording, wake and upload windows (sun times from GNSS position) and loads them into the supervisor and recorder (§6). |
+| `lb-telemetry` | Detailed health and diagnostics while Linux is up (§11). |
+| `lb-config` | Receives, validates and applies remote config to all three processors (§12). |
+| `lb-ota` | RAUC for Linux, MCUboot images for the MCUs (§13). |
+| `lb-setup` | First-boot and field-setup flow (§14). |
 
-Components talk through the SQLite catalog (tables for segments, events, upload queue, ledger) plus a small local Unix-socket API for live status. No message broker on the device; fewer moving parts.
+Linux services share state through SQLite plus a small Unix-socket API. No broker on the device.
 
-## 5. Multi-channel recording
+## 5. Recording
 
 ### 5.1 Capture
 
-- **Interface:** one multi-channel TDM/I²S ADC (for example TI TLV320ADC6140, 4 channels, or two of them for 8) to the SoC's I²S port. All channels share one sample clock, which is what makes direction-finding between mics on the same station possible. **[Open: Hardware doc picks the ADC.]**
-- **Format:** 48 kHz, 24-bit (stored as 24-bit FLAC). 48 kHz covers all Finnish bird vocalisations with margin and matches what common classifiers (e.g. BirdNET) expect. Configurable down to 32 kHz to save storage and power.
-- **Channels:** N microphone channels plus, if the ADC has a spare one, the **GNSS PPS pulse fed into a spare channel** (see §7). Channel map (which mic is where, its serial number and calibration) is part of the station config and goes into every file's metadata.
-- **Gain:** fixed analog gain per deployment profile (no automatic gain control, because AGC destroys the ability to compare loudness for counting and distance estimation). Gain and calibration values are logged per file.
-- **Buffering:** a lock-free ring buffer of ~10 s in RAM between ALSA and the encoder, so a slow SD card write never drops samples. Any overrun is logged as an explicit gap with exact sample counts, never hidden.
+- **Channels:** per hardware §4.1: ch 1-6 microphones (4 fitted by default, tetrahedral array), ch 7 spare, **ch 8 GNSS PPS**. Channel map (position in the array, pod serial, calibration and frequency correction) is station config and is written into every sidecar.
+- **Format:** 48 kHz, 24-bit, lossless FLAC (REQ-A1). All channels sample-locked on one TCXO (REQ-T2).
+- **Gain:** fixed per deployment, no AGC (REQ-A2). Gain and calibration logged per file. Gain changes only at a segment boundary and are ledgered with the effective time (REQ-O4).
+- **Recording profile:** continuous by default (REQ-C3, REQ-O1). Other profiles in §6.1.
 
-### 5.2 Segment files
+### 5.2 Segment files and storage
 
-- Fixed-length segments, default **5 minutes**, aligned to UTC wall-clock (e.g. 05:00:00, 05:05:00). Short enough that a power cut loses at most a few seconds of one file, long enough to keep file count manageable.
-- One multi-channel FLAC per segment. FLAC is lossless (needed for legal use and for re-analysis with future classifiers), open, and stores an MD5 of the decoded audio internally.
-- File name: `{station_id}_{YYYYMMDDTHHMMSSZ}_{seq}.flac`, plus a JSON sidecar with: station ID, firmware version, config hash, channel map, mic serials, gain, sample rate, first-sample UTC time, time-sync quality, PPS alignment table, GNSS position, enclosure temperature, battery voltage, gap list.
-- Writes go to a `.partial` file that is fsynced and atomically renamed when complete. A crash leaves at most one `.partial`, which is repaired (truncated to the last valid FLAC frame) and logged on next boot.
+- Fixed-length segments, default **10 minutes**, aligned to UTC (00:00, 00:10, …). A power cut loses at most the unflushed buffer of one file; the file is repaired to its last valid FLAC frame on restart and the gap logged.
+- File name: `{station_id}_{YYYYMMDDTHHMMSSZ}_{seq}.flac`, plus a small sidecar (`.json`) with station ID, firmware versions, config hash, channel map, gain, sample rate, first-sample UTC from the PPS marker, GNSS lock state and position, time-quality estimate, gap list, enclosure temperature, battery voltage.
+- **Two SD cards** (hardware §5.3). [Proposed] The recorder writes to one card (active) for a block of time (e.g. 6 h), then switches. The **idle card is handed to Linux through an SD mux**, read-only, so Linux can ingest and upload closed files without ever touching the card being written. If a card fails, the recorder continues on the other and raises an alarm. **[Open: confirm the SD mux with hardware; the alternative is reading files through the recorder over USB, which is too slow (USB FS ~1 MB/s) for the reference stream.]**
+- **Filesystem:** exFAT, so cards can be read on any PC at a service visit. exFAT is not power-loss safe on its own, so the recorder pre-allocates each file, writes FAT/directory entries only at open and close, and relies on the hash chain (not the filesystem) to prove integrity. A damaged directory can be rebuilt from the chain plus the FLAC frame headers.
+- **Never deleted on the station** unless the cloud has confirmed the hash (REQ-I3) and retention config allows it; normally cards are swapped at service visits.
 
-### 5.3 Data volume (why we can't upload everything)
+### 5.3 Data volume
 
-| Setting | Raw | FLAC (≈55 %) | Per day if continuous |
-|---|---|---|---|
-| 4 ch × 48 kHz × 24 bit | 576 kB/s | ~320 kB/s | ~27 GB |
-| 4 ch, dawn+dusk only (~8 h/day) | | | ~9 GB |
-| 1 ch × 48 kHz × 24 bit | 144 kB/s | ~80 kB/s | ~7 GB |
+From hardware §5.3: about 35 GB/day for 4 channels (about 1 TB per 28 days), about 52 GB/day for 6 channels, about 8 GB/day for one reference channel. This is why the archive of record is the SD cards and the upload is a chosen subset (§9).
 
-So the station **keeps full lossless audio locally** (retrieved on pickup or on request) and **uploads a selected subset** over 4G (§9). REQ-O1/O2 require 28 days continuous on all channels with the whole deployment held locally: for 4 channels that is ~750 GB, so **1 TB industrial storage is the minimum** for a 4-channel station (2 TB for 8 channels). Local masters are deleted only after the cloud has verified their hash (REQ-I3) or the station is collected.
-
-Power consequence: 28 days continuous at ~1.5 W is ~1 kWh. Without useful winter solar that means a large battery (e.g. ~100 Ah at 12 V LiFePO4 with margin). This is the main input to the Hardware doc's power budget.
-
-## 6. Scheduling and power saving
+## 6. Scheduling and power
 
 ### 6.1 Recording profiles
 
-Profiles are config, selectable per deployment from the app. **Continuous is the default** whenever power allows (REQ-C3, REQ-O1); the other profiles exist for low-power deployments and standard survey methods.
+Profiles are config, selectable per deployment from the app (REQ-C3):
 
-- **Continuous** 24/7.
-- **Sun-based** windows computed on the station from its GNSS position and date: e.g. dawn chorus from 1 h before civil dawn to 4 h after sunrise, dusk from 1 h before sunset to 1 h after civil dusk. Works through Finnish summer (sun barely sets in Lapland) and winter (polar night) because the rule falls back to fixed clock windows when the sun event does not occur.
-- **Nocturnal migration (nocmig)** window: dusk to dawn, typically spring and autumn.
-- **Duty cycle**, e.g. 1 min on / 4 min off, for long low-power deployments and for standard protocols.
-- **Custom** list of windows, combinable with the above.
+- **Continuous** 24/7 (default).
+- **Sun-based** windows from the station's GNSS position: e.g. "breeding season dawn" from 1 h before sunrise for 4 h, dusk windows. Polar day and polar night fall back to fixed clock windows when the sun event does not occur.
+- **Night singers / nocturnal migration:** dusk to dawn.
+- **Duty cycle**, e.g. 1 min on / 4 min off.
+- **Custom** windows, combinable.
 
-The schedule for the next 48 h is computed ahead and shown in the app, so the buyer sees exactly what will be recorded.
+`lb-scheduler` computes 7 days ahead and loads the table into the recorder and supervisor, so the MCUs never need sun maths. If the table runs out (Linux has not booted for a week), the recorder falls back to continuous recording, never to stopping. The plan is shown in the app.
 
-### 6.2 Sleep and wake
+### 6.2 Linux wake windows
 
-Between windows the SoC is powered off completely; the supervisor MCU keeps the RTC and wakes it ~2 min before the next window (boot + time sync + mic check). Modem is powered only during upload windows. Target figures to check with Hardware:
+Linux is the expensive part (about 1.5 W while up; hardware §7.2 budgets about 2 h/day). It boots for:
 
-| State | Target power |
-|---|---|
-| Sleeping (MCU + RTC only) | < 10 mW |
-| Recording + detection, modem off | < 1.5 W |
-| Uploading over 4G | 2.5-4 W, short bursts |
+- Scheduled upload windows (default: two or three per day, placed when signal and battery are usually best, and outside the most important recording windows to keep modem noise away; modem RF does not affect the archive but some users will want the quietest possible station).
+- A cloud wake request (on-demand clip, support session, urgent config).
+- Backlog or fault conditions raised by the recorder or supervisor.
+
+Linux shuts itself down when the window's work is done, or the supervisor cuts it at the window end after a clean shutdown request.
 
 ### 6.3 Power-aware degradation
 
-The scheduler reads battery state of charge, solar input and temperature from the supervisor and steps down in a fixed order as energy runs short:
+The supervisor steps down in a fixed order when energy runs short; each step is logged in the chain and reported:
 
-1. Reduce upload windows (keep telemetry).
-2. Upload only event index and telemetry, no audio.
-3. Shrink recording to priority windows (dawn chorus first).
-4. Reduce channels (keep the reference mic).
-5. Telemetry heartbeat only, recording paused.
-6. Safe shutdown; MCU wakes daily to check if charge recovered.
+1. Shorter or fewer Linux wake windows.
+2. No audio upload; manifests and status only.
+3. Reduce recorded channels (keep the array's reference mic and PPS) or switch to the priority profile, as the project config says.
+4. Recording stops; status heartbeat only.
+5. Recorder closes files, final manifest goes up, everything off except the supervisor, which checks daily for recovered charge.
 
-Every step change is logged and reported, so the data user knows why a gap exists. Thresholds are config.
+Thresholds are config. With the 6S2P LTO winter pack the hardware budget is about 34 days continuous with no sun, so this is a safety net, not normal operation.
 
 ### 6.4 Winter specifics
 
-- LiFePO4 must not be charged below 0 °C: the supervisor blocks charging and uses the heater (if fitted) before charging. **[Open: battery chemistry from Hardware.]**
-- Boot is gated on enclosure temperature being inside the SoC/SD card rated range; the MCU can pre-heat.
-- Mic icing or snow cover shows up as loss of high frequencies and lower noise floor; the detector flags this as a data quality issue (§8).
+- Linux is booted only after the supervisor has warmed the CM4 into its rated range (hardware: -20 °C for CM4).
+- Mic pod heaters follow hardware §3.3; heater-on periods are logged because heater noise or changed response may affect detection.
+- Ice or snow on a pod shows up as high-frequency loss and in the self-test chirp result; it is flagged as reduced effort (REQ-A4, REQ-C2).
 
 ## 7. Time synchronisation
 
-Accurate time matters for three things: legal timestamps, combining counts across stations, and **localising a bird from arrival-time differences between stations** (sound travels ~34 cm per ms, so 1 ms error ≈ 34 cm position error).
+Hardware §4.2 gives the method; the software side:
 
-**[Proposed]** design:
+1. **PPS in the audio (ch 8)** is the timing reference. The recorder detects the PPS edge in ch 8 for each second and pairs it with the UTC second from NMEA. The sidecar stores a (sample index → UTC second) table, so any sample has a GNSS-traceable time, independent of software latency. This meets REQ-T1 and the cross-station part of REQ-T2 with a large margin (one sample is about 21 µs).
+2. **Backup:** the recorder also timestamps PPS on a timer input, so timing survives if ch 8 is ever lost.
+3. **No GNSS lock:** the recorder keeps time on the TCXO, logs the lock loss, and the sidecar records the estimated drift since last lock (REQ-T1). Linux, when up, uses chrony with NTP as a coarse check only.
+4. All stored times are UTC ISO 8601 (REQ-T3).
+5. The cloud does the precise cross-station alignment from the tables; nothing on the station resamples audio.
 
-1. **GNSS receiver with PPS** on every station. gpsd + chrony discipline the system clock to well under 1 µs from PPS. Position is logged too.
-2. **Sample-accurate alignment.** System time alone is not enough because the ADC's crystal drifts (tens of ppm, temperature dependent). Two ways, best first:
-   - **PPS in an audio channel:** the PPS pulse, attenuated, goes into a spare ADC channel. Each second's pulse is found in the audio itself, so every sample has a GNSS-traceable timestamp, immune to software latency. This is the method used by research microphone arrays.
-   - **Software alignment:** the recorder logs the sample counter at each PPS interrupt. Accurate to roughly 10-100 µs, depending on kernel latency.
-   Either way the sidecar carries a table of (sample index → UTC) once per second, so the cloud can resample and align stations exactly.
-3. **Fallback:** if GNSS has no fix (dense forest, indoors), chrony uses NTP over 4G (~5-50 ms) and the RTC. Each file records which source and estimated error were in effect, so analysis knows which data is good enough for localisation.
-4. The supervisor MCU's RTC (TCXO-grade, ±2 ppm) keeps time across sleep so schedules are right even before GNSS fixes.
+## 8. Health and event detection (no species ID)
 
-## 8. On-device event detection (no species ID)
+### 8.1 On the recorder, always (REQ-A4)
 
-Purpose: decide **what to upload first** and give a cheap activity overview. It must be conservative: it flags, it never deletes, because all audio is kept locally.
+Per channel, per minute: RMS, peak, clipping count, DC offset, noise floor in 3-4 bands (e.g. <1 kHz, 1-4, 4-8, 8-16 kHz), and a simple wind indicator (low-frequency energy with low inter-channel coherence). Fault rules (dead channel, clipping, abnormal noise floor, high-frequency loss suggesting ice or water) raise flags that go into the chain and the hourly status. A few hundred bytes per minute.
 
-Per channel, per segment, computed on a short-time spectrum (e.g. 1024-point FFT, 50 % overlap):
+The **daily self-test chirp** (hardware §3.4) is triggered by the recorder at a quiet hour; its result per channel (sensitivity, delay) is logged and the chirp interval marked so analysis ignores it.
 
-- **Band energy detector**, 1-12 kHz, against an adaptive noise floor (running median per frequency band). Above-threshold regions longer than ~50 ms become candidate events, merged across channels, padded by 1-2 s.
-- **Noise/weather classification** using spectral flatness, low-frequency energy and inter-channel coherence: wind, rain, and anthropogenic noise (traffic, aircraft) get flagged so they're not uploaded as "events" and so data quality is known.
-- **Per-minute summary:** RMS level, noise floor, event count, acoustic indices (e.g. ACI, NDSI). Small, always uploaded, gives the app a live activity heatmap.
-- **Mic health:** dead channel, clipping, DC offset, channel imbalance, high-frequency loss (icing/wet membrane).
+### 8.2 On Linux, over the backlog
 
-CPU cost is small (well under 10 % of one core on a CM4) and runs after each segment closes, not in the capture path. Thresholds are config so they can be tuned per site from the cloud.
+When Linux is up, `lb-detector` processes ingested files it has not seen yet:
 
-## 9. Compression and upload over 4G
+- **Band-energy event detector** (1-12 kHz) against an adaptive noise floor, merged across channels, events padded by 1-2 s.
+- **Noise and weather flags:** rain, wind, anthropogenic noise (traffic, aircraft, chainsaws) from spectral flatness, low-frequency energy and coherence.
+- **Per-minute acoustic indices** (e.g. ACI, NDSI) for the app's activity heatmap.
 
-### 9.1 What gets uploaded, in priority order
+The output is an event index used to prioritise uploads (§9.1) and to answer "anything interesting here?" before the full data arrives. It flags, it never deletes. CPU cost: a few minutes of CM4 time per day of audio *(est., confirm in v0)*. Thresholds are config.
 
-1. Telemetry and alerts (tiny, always).
-2. Ledger head and file manifests (tiny, always; see §10).
-3. Per-minute summaries and event index.
-4. **Event clips**: detected events with padding, all channels, FLAC (lossless) by default.
-5. **Reference stream**: one channel of everything recorded, Opus at ~64 kbit/s (≈0.7 GB/day continuous), for cloud species ID over the full period. Configurable on/off.
-6. **On-demand requests** from the cloud: specific time ranges in full FLAC (user asks "give me 05:10-05:20, all channels").
-7. Full-archive trickle upload if budget allows.
+Speech detection (REQ-P1) runs in the cloud on whatever is uploaded; see §18.
 
-A **daily data budget** (e.g. 1 GB/day, set to match the SIM plan) caps 4-7. When the budget runs out, items wait. **[Open: SIM plan and budget.]**
+## 9. Upload over 4G
+
+### 9.1 Upload policy (agreed with hardware §6.4)
+
+Per project config, in priority order:
+
+1. **Always, via the supervisor (Linux off):** hourly status, alarms, the current chain head.
+2. **Always, at each Linux wake:** all new signed manifest entries and sidecars, health summaries and the event index (kilobytes to a few MB per day). The cloud then knows exactly which files exist and can verify any file that arrives later (REQ-I2, REQ-I3).
+3. **Default audio:** one **reference channel in FLAC** (about 8 GB/day) for cloud species ID, lossless so cloud and local results stay identical (REQ-A1, REQ-R*). Under a tight data or energy budget, the project can choose Opus at ~64-96 kbit/s instead (about 1 GB/day), marked as a listening/ID copy, never the archive.
+4. **On demand:** multichannel clips or time ranges requested from the app (e.g. events for localisation, Level 3 counting).
+5. **When power and coverage allow:** the full multichannel archive, oldest first.
+6. **At service visit:** the SD cards are ingested in the cloud and every file is verified against the signed chain.
+
+A **daily data and energy budget** caps 3-5 (set from the SIM plan and battery state). Items wait when the budget is used up.
 
 ### 9.2 Transport
 
-- **HTTPS uploads with resumable chunks** (S3-compatible multipart via pre-signed URLs, or the tus protocol; decided with the Cloud doc). A chunk interrupted by 4G dropout resumes from where it stopped.
-- **Idempotent by content hash:** every object is named by its SHA-256, so retries never create duplicates and the cloud can verify integrity on arrival.
-- Cloud acknowledges each object; only acknowledged objects are marked uploaded. Local copies are kept regardless until retention policy and pickup say otherwise.
-- TLS with a per-device client certificate (private key in a secure element if Hardware fits one, e.g. ATECC608 or TPM).
+- **HTTPS with resumable chunked upload** (S3-compatible multipart via pre-signed URLs, or tus; decided with the Cloud doc). Interrupted chunks resume.
+- **Content-addressed:** objects are named by SHA-256, so retries never duplicate and the cloud verifies on arrival. Only cloud-verified objects are marked received (REQ-I3).
+- **TLS with a per-device client certificate** whose key is in the secure element.
+- No inbound connections (carrier NAT); everything is outbound: MQTT, HTTPS, WireGuard.
 
-### 9.3 Buffering during outages
+### 9.3 Outages
 
-The upload queue lives in SQLite and on disk, so it survives reboots and multi-day outages. Retry with exponential backoff and jitter; when the link comes back, priorities above are respected (telemetry first). Disk space accounting reserves room so recordings never stop because of a full upload queue (oldest *already uploaded* Opus copies are evicted first; master FLAC is never evicted automatically unless config says so, and that is logged).
-
-### 9.4 Connectivity
-
-- LTE Cat-1 or Cat-4 modem (Cat-M1/NB-IoT are too slow for audio). ModemManager handles attach; signal metrics go to telemetry.
-- No inbound connections (4G is usually behind carrier NAT). All channels are outbound: MQTT for control, HTTPS for data, WireGuard for support shell.
+The upload queue lives in SQLite on the Linux eMMC; the source data is on the SD cards, so nothing needs to be buffered twice. If 4G is down for days, the recorder just keeps writing; the next window resumes in priority order (status and manifests first). The supervisor's hourly status is queued in its own RAM/flash and sent when the modem reconnects.
 
 ## 10. Storage integrity and audit trail
 
-Goal: anyone receiving the data can verify that **a given file was recorded by station X at time T and has not been changed since**.
+Goal: anyone receiving the data can verify that **a file was recorded by station X at time T and has not been changed since** (REQ-I1 to REQ-I6).
 
-- **Per file:** SHA-256 of the FLAC and sidecar, plus FLAC's internal MD5 of audio samples.
-- **Hash-chained ledger:** an append-only log in SQLite (also exported as JSON lines) where each entry contains: file hash, metadata hash, time, sequence number, and the **hash of the previous entry**. Removing or editing any past entry breaks the chain.
-- **Signed:** entries (or batches) are signed with the station's private key (Ed25519). The public key is registered with the cloud at manufacturing/pairing.
-- **Anchored:** the current chain head is sent with telemetry every few minutes. Since the cloud holds earlier heads, even physical access to the station cannot rewrite history without detection.
-- Non-audio events are in the ledger too: config changes, updates, gaps, time-source changes, degradation steps, manual operations. This is the audit trail for legal use.
-- **Background scrub:** `lb-store` re-reads and re-hashes stored files at low priority and reports any mismatch (SD/flash bit rot).
-- **Filesystem:** separate data partition on industrial-grade storage (pSLC microSD/eMMC or SSD), ext4 with journaling; read-only root filesystem. On low battery the supervisor signals the SoC to close the current segment and shut down cleanly before cutting power.
+- **At file close, on the recorder:** SHA-256 of the FLAC and the sidecar (REQ-I1); FLAC also carries its own MD5 of the decoded audio.
+- **Chain:** each manifest entry holds the file hashes, segment time, sequence number, firmware/config hashes and **the hash of the previous entry**, and is **signed by the secure element** (REQ-I2). The key never leaves the secure element; its public key is registered with the cloud at manufacture.
+- **Copies of the chain:** written to both SD cards (so either card alone is verifiable), held in recorder flash for the last few days, and uploaded at each Linux wake. The **chain head goes up hourly** with the supervisor's status, so even physical access to the station cannot rewrite history unnoticed.
+- **Non-audio entries** in the same chain: config changes with effective time (REQ-O4), firmware updates, gaps, GNSS lock changes, card switches, degradation steps, heater periods, self-test results, support sessions. This is the station side of the audit log (REQ-I5).
+- **Background verification:** `lb-ingest` re-hashes every file it reads from the idle card and reports any mismatch (card bit rot) immediately.
 
 ## 11. Health telemetry
 
-Sent over MQTT/TLS every 15 min during awake periods (heartbeat every 1-6 h while asleep, by MCU-triggered wake), batched when offline.
-
-- **Power:** battery voltage, current, state of charge, solar input, temperature of battery.
-- **Environment:** enclosure temperature and humidity, heater state.
-- **Audio:** per-channel RMS, noise floor, clipping count, mic health flags.
-- **Storage:** free space, write errors, scrub results, upload queue size.
-- **Network:** RSRP/RSRQ/SINR, operator, bytes used today vs budget.
-- **Time:** source (GNSS/NTP/RTC), offset estimate, GNSS fix and satellites.
-- **System:** uptime, boot reason, service restarts, CPU temp, firmware version and slot, config version.
-
-Alerts (sent immediately): mic failure, storage near full or errors, battery critical, enclosure open (if a switch is fitted), time sync lost for > N hours, update rolled back.
+- **Hourly, from the supervisor with Linux off (REQ-O3):** recording state, battery (V, I, SoC, remaining days), temperatures and humidity, heater state, GNSS lock, mic health flags, free space on each card, last successful upload, chain head, signal strength. Under 1 kB.
+- **Alarms immediately:** mic failure, card failure or near full, battery critical, recorder restart, time lock lost for > N h, update rolled back, enclosure open (if fitted).
+- **Detailed, while Linux is up:** per-minute health history, upload queue and budget, CPU temperature, service restarts, detector summary, full logs on request.
 
 ## 12. Remote config and remote access
 
-- **Desired/reported state:** the cloud publishes a desired config document; the station reports what it is actually running. Mismatch is visible in the app.
-- Config is a single versioned JSON document validated against a schema, signed by the cloud, and **applied atomically** at the next safe point (between segments). If services are unhealthy within 10 min after applying, the station reverts to the previous config and reports why.
-- Everything the buyer can change in the app (profiles, windows, gain preset, budget, detector thresholds, telemetry interval) is config, not code.
-- **Support access:** a WireGuard tunnel to our support hub, opened only on request from the cloud, auto-closes after a time limit, logged in the ledger. SSH key-only, no passwords.
+- **Desired/reported state:** the cloud publishes a versioned, schema-validated, signed config document; the station reports what each processor is running. Mismatch is visible in the app.
+- Small, urgent changes (e.g. "wake Linux now", gain preset) can arrive through the supervisor while Linux is off; it queues them, logs them, and passes recorder settings on at the next segment boundary (hardware §6.3). Everything else is applied by `lb-config` at the next wake.
+- **Atomic with rollback:** recorder settings apply at a segment boundary; if health checks fail within 10 min, the previous config is restored and the reason reported. Every change is ledgered with its effective time (REQ-O4).
+- Everything the buyer can set in the app (profiles, windows, gain preset, budgets, detector thresholds, wake windows) is config, not code.
+- **Support access:** WireGuard tunnel opened only on a cloud request, time-limited, logged in the chain. Key-only SSH.
 
-## 13. Safe OTA updates
+## 13. Safe updates (OTA)
 
-- **A/B root filesystem with RAUC:** the update is written to the inactive slot while the station keeps recording. Bundles are signed; the station refuses unsigned or wrongly-signed bundles.
-- **Boot counting:** the bootloader tries the new slot a limited number of times. `lb-health` marks it good only after recorder, detector, uploader and time sync all report healthy and a test segment is written. Otherwise it falls back to the old slot automatically and reports.
-- **Timing:** installs only outside recording windows, with enough battery, and downloads are resumable over the budgeted 4G.
-- **Staged rollout:** cloud releases to a canary group of stations first, then the fleet.
-- **Data is never touched** by updates (separate partition). Config schema migrations ship with the update and are reversible.
-- **Supervisor MCU firmware** updates are rare, done through a dual-bank MCU bootloader (e.g. MCUboot under Zephyr) with the same sign-and-fallback rule.
+- **Linux:** RAUC A/B. The bundle is downloaded over several wake windows if needed, written to the inactive slot, and booted with a boot counter. `lb-ota` marks it good only after all services are healthy and it has talked to the recorder and the cloud; otherwise the bootloader falls back.
+- **Recorder and supervisor firmware:** signed MCUboot images, delivered by Linux. The new image is written to the secondary slot while the old one keeps running; the swap happens at a segment boundary, and MCUboot reverts if the new image does not confirm itself. The recorder swap costs a recording gap of a few seconds, which is ledgered as reduced effort; updates are scheduled outside the project's priority windows.
+- **Never touches data:** SD cards and the chain are outside all update paths.
+- **Staged rollout:** canary stations first, then the fleet. Battery and temperature gates before any install.
 
 ## 14. Field setup (buyer experience)
 
-1. Buyer mounts station and mics, connects battery, presses power.
-2. Station boots, self-tests (each mic, storage, GNSS, modem) and shows result on a status LED pattern.
-3. Buyer scans the QR code on the station with the app; station is claimed to their account (pairing uses the device certificate, no passwords typed).
-4. App shows live levels from each mic (short test clips uploaded) and the recording plan for the next 48 h. Buyer confirms.
-5. If no 4G at the spot, setup works over the phone via BLE or Wi-Fi hotspot, and the station records offline. **[Open: which local link the Hardware doc fits.]**
+1. Buyer mounts the array and power pack, connects, presses power.
+2. Station self-tests (each mic with the chirp, both cards, GNSS, modem) and shows the result on a status LED.
+3. Buyer scans the station's QR code in the app; the station is claimed to their project using its device certificate.
+4. App shows live levels per mic (short clips uploaded), the GNSS position, and the recording plan. Buyer confirms; calibration with the acoustic calibrator is guided by the app for consultant kits (REQ-A3).
+5. Without 4G at the spot, setup should work through the phone over BLE or Wi-Fi. **[Open: hardware doc's CM4 has no wireless; needs a decision.]**
 
 ## 15. Testing strategy
 
-- **Unit and property tests** for the ledger, scheduler (sun times for all of Finland across a whole year, including polar day/night), and upload queue.
-- **Fault injection rig:** repeated random power cuts during writes (target: zero corrupted files over 1000 cuts), 4G dropouts of minutes to days, full disk, GNSS loss, clock jumps.
-- **Soak test:** 30 days continuous on the bench before every release.
-- **Cold chamber:** boot, record and update at -30 °C.
-- **Time sync verification:** two stations recording the same click from a known position; measured arrival-time difference vs geometry.
-- **Reference audio regression:** known recordings replayed through the pipeline; detector output must stay within tolerance across releases.
+- **Unit and property tests:** chain building and verification, FLAC encoder output vs libFLAC decode (bit-exact), scheduler for all of Finland across a full year (polar day and night), upload queue.
+- **Recorder on the bench:** 72 h continuous at max channels with zero overruns; compare `rec-fw` files with `lb-recorder` files of the same input.
+- **Fault injection:** 1000 random power cuts during writes with zero unverifiable files; card removal and failure; 4G down for days; Linux killed mid-upload; GNSS loss.
+- **Soak:** 30 days on the bench before each release.
+- **Cold chamber:** record at -30 °C; boot Linux after pre-heat; update all three processors in the cold.
+- **Timing:** two stations record the same click from a known position; compare measured arrival difference with geometry.
+- **Reference audio regression** for the detector.
 
 ## 16. Prototype plan (input to step 3)
 
-1. Bench: CM4/CM5 + 4-ch TDM ADC + GNSS with PPS. `lb-recorder` writing 5-min FLAC segments with sidecar and PPS alignment.
-2. Add `lb-store` ledger and `lb-uploader` with a test bucket; power-cut and outage tests.
-3. Add scheduler + supervisor MCU sleep/wake; measure real power in each state.
-4. Add detector, telemetry, config; then RAUC A/B.
-5. Two-station outdoor trial for time-sync and detector tuning.
+**v0 (architecture A, bench, per hardware §12):** CM4 on IO board, ADC6140 EVM, MEMS mics, GNSS with PPS on ch 8, EG25-G.
 
-## 17. Requirements traceability
+1. `lb-recorder` writes FLAC segments, sidecars and the signed chain in the **final product format** (software key until the secure element is fitted).
+2. `lb-ingest`, `lb-uploader` to a test bucket; outage and power-cut tests.
+3. `lb-detector`, `lb-scheduler`, `lb-config`, RAUC.
+4. Real recordings go to the Cloud thread to start the analysis pipeline.
+
+**v1 (architecture B, field):**
+
+5. `rec-fw` on an H7 dev board first (Nucleo-H735 + ADC EVM), proving real-time FLAC and SHA-256; then on the custom carrier.
+6. `sup-fw`, SD mux handover, MCUboot updates.
+7. 2-week outdoor test, then 4-week January test.
+
+Because the file format, chain and Linux daemons are the same in v0 and v1, everything except `lb-recorder` carries over unchanged.
+
+## 17. Risks (software side)
+
+| Risk | Mitigation |
+|---|---|
+| H7 can't FLAC-encode 6-8 ch in real time | Fixed-predictor encoder; fallback to WAV + Linux transcode; drop to 4 ch |
+| exFAT corruption on power loss | Pre-allocation, minimal metadata writes, chain-based recovery, supervisor clean shutdown |
+| SD mux handover bugs | Card switch only at segment boundary, handshaked through the supervisor; Linux mounts read-only |
+| Three firmware images to keep compatible | One release bundle with all three, versioned protocol between processors, compatibility check before swap |
+| Upload energy exceeds budget at weak signal | Energy budget per window, measured Wh/GB per site, automatic step down (§6.3) |
+
+## 18. Requirements traceability
 
 | Requirement | Where handled |
 |---|---|
-| REQ-T1 GNSS-disciplined time, <10 ms to UTC, lock state logged | §7 (GNSS + PPS, chrony, per-file time source and error) |
-| REQ-T2 shared clock in array <0.1 ms, <1 ms between stations | §5.1 single TDM ADC per station, §7 PPS-in-audio alignment |
-| REQ-T3 UTC everywhere, sun times from station position | §5.2 file naming/sidecar, §6.1 |
-| REQ-A1 lossless FLAC archive ≥48 kHz | §5.1, §5.2; Opus only for reference stream (§9.1) |
-| REQ-A2 fixed recorded gain, no AGC | §5.1 |
-| REQ-A3 mic sensitivity per unit | §5.1 channel map with serial and calibration in every sidecar |
-| REQ-A4 per-mic health, faults reduce effort | §8 mic health, §11 telemetry |
-| REQ-A5 weather context | §8 wind/rain flags, §11 enclosure temperature |
-| REQ-C2 exact survey effort incl. gaps | §5.1 explicit gap logging, §6.3 degradation steps logged, §10 ledger |
-| REQ-C3 schedule presets, continuous default | §6.1 |
-| REQ-I1 SHA-256 at file close | §10 |
-| REQ-I2 signed, chained manifests, key in secure element | §10, §9.2 |
-| REQ-I3 cloud verifies hash before local delete | §9.2, §5.3 |
-| REQ-I5 audit log | §10 (station side: config, updates, gaps, access) |
-| REQ-P1 speech detection | Runs in the cloud on uploaded audio. Station side: support-tunnel and raw-audio access are logged (§12). An optional on-device speech flag to hold back clips from upload is possible later. |
-| REQ-P5 encryption in transit | §9.2 TLS with device certificate; data partition encryption at rest **[Open: key handling vs. field retrieval]** |
-| REQ-O1 28 days continuous, -30 °C | §5.3 storage, §6.4 winter, §15 cold chamber and soak tests |
+| REQ-T1 GNSS-disciplined time, lock state logged | §7 |
+| REQ-T2 shared clock, <1 ms between stations | §5.1 (one TCXO), §7 (PPS in ch 8) |
+| REQ-T3 UTC, sun times from position | §5.2, §6.1 |
+| REQ-A1 lossless FLAC ≥48 kHz | §5.1; Opus only as optional listening/ID copy (§9.1) |
+| REQ-A2 fixed recorded gain | §5.1 |
+| REQ-A3 mic sensitivity per unit | §5.1 channel map, §14 guided calibration |
+| REQ-A4 per-mic health, faults reduce effort | §8.1, §11 |
+| REQ-A5 weather context | §8.1 wind, §8.2 rain/wind flags, §11 temperatures |
+| REQ-C2 exact effort incl. gaps | §5.1-5.2 gap logging, §6.3, §10 chain entries |
+| REQ-C3 presets, continuous default | §6.1 |
+| REQ-I1 SHA-256 at file close | §4.1, §10 |
+| REQ-I2 signed chained manifests, key in secure element | §10 |
+| REQ-I3 cloud verifies before local delete | §5.2, §9.2; upload scope per §9.1 (agreed with hardware §6.4; requirements wording to be aligned) |
+| REQ-I5 audit log (station side) | §10 non-audio entries |
+| REQ-P1 speech detection | Cloud, on uploaded audio. SD cards collected at service visits are ingested through the same pipeline. An on-device speech flag to hold back clips is possible later on Linux. |
+| REQ-P5 encryption in transit / at rest | §9.2 TLS; at-rest encryption of SD cards **[Open: conflicts with "readable on any PC" and with key handling at service visits]** |
+| REQ-O1 28 days continuous, -30 °C, no silent loss | §2 architecture B, §5.2 two cards, §6.3, §15 |
 | REQ-O2 record when 4G down, catch up | §9.3 |
-| REQ-O3 status at least hourly | §11 (every 15 min when connected) |
-| REQ-O4 config changes logged, effective at recorded time | §12 (applied between segments, ledger entry with effective time) |
-| REQ-O5 1-20+ stations | No per-station coupling on the device; fleet handled in cloud (§12, §13 staged rollout) |
+| REQ-O3 hourly status | §11 via supervisor |
+| REQ-O4 config changes logged with effective time | §12 |
+| REQ-O5 1-20+ stations | Nothing station-to-station on the device; fleet handled in cloud (§12, §13) |
 
-## 18. Open questions for walto
+## 19. Open questions for walto
 
-1. **What is "multi-microphone" for?** (a) Wider coverage / redundancy, (b) direction-finding on one station, (c) locating birds across several stations, or several? (b) needs a fixed mic array with one shared clock; (c) needs sample-accurate GNSS time on every station. This drives the ADC choice and whether the PPS-in-audio method is required.
-2. **How many mics per station** do you picture, and mounted on the enclosure or on cables?
-3. **Power source:** solar + battery, or battery only swapped at each 2-4 week visit? Solar is near zero in northern Finland in December, which strongly affects the default recording profile.
-4. **Must all raw audio be kept** for legal use (record everything lossless locally), or are event clips enough for some buyers?
-5. **4G data budget:** roughly how much per station per month would buyers accept paying for (e.g. 10 GB vs 50 GB)?
-6. **Are you OK starting on a Raspberry Pi CM4/CM5** for the prototype? Or do you have another board in mind?
-7. **Setup without 4G coverage:** is BLE or a Wi-Fi hotspot for phone setup acceptable on the hardware side?
+Several earlier questions are answered by the hardware doc (4-6 mic tetrahedral array, LTO pack with no solar needed, CM4 as Linux module). Remaining:
+
+1. **What are the multiple mics mainly for:** direction-finding at one station (Level 3 counting), locating birds across stations, or both? This decides how much multichannel audio must be uploaded on demand versus only collected at service visits.
+2. **Upload default:** is one lossless reference channel (about 8 GB/day, ~240 GB/month per station) acceptable for the SIM cost, or should the default be compressed (about 1 GB/day) with lossless on demand?
+3. **Phone setup without 4G:** add BLE to the station (e.g. a small BLE module on the supervisor), or accept that setup needs 4G coverage?
+4. **SD card encryption:** do consultants need cards encrypted (protects speech recordings if a card is lost, REQ-P5), accepting that cards are then only readable with our tool?
