@@ -85,7 +85,7 @@ per deployment in remote config:
 |---|---|---|---|
 | **Full** | All channels, FLAC | Copy of everything | Good power, need near-real-time localization |
 | **Reference + opportunistic** | 1 reference channel; other channels when battery/solar and coverage allow (hardware doc §6.4) | All channels | Summer, good sites |
-| **Reference** *(recommended default)* | 1 reference channel, FLAC | All channels | Most deployments: ID in near-real-time, localization after retrieval or on request |
+| **Reference** *(recommended default)* | 1 reference channel, Opus ~96 kbit/s (see §3.1.1) | All channels | Most deployments: ID in near-real-time, localization after retrieval or on request |
 | **Harvest** | Telemetry only | Everything | Very low power / poor coverage |
 
 In Reference mode the cloud can **request specific time windows of the other
@@ -94,8 +94,33 @@ channels** (e.g. "send all channels for detections of Capercaillie on
 In every mode the **SD cards are the archive of record**; see §3.3 for how
 they are ingested at service visits.
 
-Recording schedules (e.g. dawn chorus + night migration only) reduce all of
-the above proportionally and are part of remote config.
+**Decision (walto, 2026-11-02): stations record continuously.** Schedules
+remain available in remote config for customers who want them, but the default
+is 24/7 on all channels.
+
+#### 3.1.1 Lossless or compressed?
+
+| | Lossless (FLAC) | Compressed (Opus ~96 kbit/s, mono) |
+|---|---|---|
+| Size, 1 channel | ~5–8 GB/day, ~150–240 GB/month | ~1 GB/day, ~30 GB/month |
+| Species ID | Reference quality | Published tests with BirdNET-type models show little loss at ≥ 64–96 kbit/s; *to be confirmed on our own Finnish data in the prototype* |
+| Localization (TDOA/DOA) | Required: timing and phase between channels must be exact | **Not suitable**: lossy codecs alter phase and fine timing |
+| Evidence value | Original, bit-exact, hash matches the station's manifest | A derived copy; fine for screening, not as the record |
+| 4G power and data | High; hard in winter | Low; feasible all year |
+
+**Recommendation:** use both, each where it fits.
+- **SD card: always lossless, all channels.** This is the archive of record,
+  used for localization, counting and evidence.
+- **Live 4G reference channel: compressed (Opus)** for near-real-time species
+  ID, alerts and listening in the app. The station's manifest carries hashes of
+  both the lossless original and the compressed copy, so the link is provable.
+- **Localization clips requested over 4G: lossless**, as they are only a few
+  seconds per event.
+- After SD ingest the final analysis is rerun on the lossless audio, and
+  reports are based on that run. Any detection that changes between the
+  compressed and lossless runs is visible in the run comparison (§4.3).
+- Customers with good power and coverage can switch the live stream to
+  lossless in remote config.
 
 ### 3.2 Upload protocol
 
@@ -359,7 +384,7 @@ feature, not an add-on.
 | **Laji.fi / FinBIF** | Reviewed observations in a FinBIF-compatible import format, with taxon ids from the FinBIF taxonomy API. Exact format and whether automated submission via API is allowed must be confirmed with Luomus/FinBIF |
 | **Darwin Core Archive** | For GBIF and international research use |
 | **GeoJSON / GeoPackage** | Stations, detections, localizations for GIS |
-| **PDF report** | Per deployment or project: methods, effort (hours recorded per station), species list and activity charts, maps, review coverage and precision, model and software versions, data-integrity appendix. Template aimed at consultants' YVA / wind-power assessments |
+| **PDF report** | Per deployment or project: methods, effort (hours recorded per station), species list and activity charts, maps, review coverage and precision, model and software versions, data-integrity appendix. Templates for the three legal uses walto named: YVA (environmental impact assessment, e.g. wind power), Natura assessments, and permit-condition monitoring |
 
 All exports record which run and which review state they came from.
 
@@ -404,16 +429,51 @@ start on Hetzner or UpCloud and move if needed.
   to put up.
 - **User accounts:** minimal personal data (name, email, organization), EU-only
   email/SMS providers where possible.
-- **Retention & deletion:** configurable per project (e.g. 1 year default,
-  up to 10 years for legal cases, moved to cold storage), with deletion that
-  respects object-lock commitments.
+- **Retention & deletion:** see §11.3.
 - **Security:** encryption in transit and at rest, MFA for accounts, role-based
   access, audit log, regular backups to a second EU location.
+
+### 11.3 Customer owns the data
+
+**Decision (walto, 2026-11-02): the customer owns their data.** Design rules:
+
+- **Ownership in the contract:** recordings, detections, reviews and reports
+  belong to the customer. We process them only to provide the service.
+- **Local-only option:** a customer can run everything on their own computer
+  (desktop app, §6) and use the cloud only for device management (status,
+  config, alerts), with **no audio or results stored by us**. In that mode
+  the 4G link carries only telemetry and manifests.
+- **Full export at any time:** one-click export of a project or the whole
+  account: original audio with manifests, all analysis runs, reviews, audit
+  log and reports, in open formats (FLAC, CSV, JSON, GeoPackage). Exports
+  are importable into the desktop app, so leaving the cloud loses nothing.
+- **Deletion:** the customer can delete a project; we confirm deletion in
+  writing, including backups within their rotation period. Object-lock periods
+  are chosen by the customer when the project starts, and the app explains
+  that locked audio cannot be deleted before that date.
+- **Model training:** we use customer audio or reviews to improve models only
+  with explicit opt-in consent per project.
+
+**Proposed default retention** (walto had no preference; customer can change
+it per project):
+
+| Data | Default | Why |
+|---|---|---|
+| Raw lossless audio | **3 years** after deployment end; hot for 3 months, then cold storage | Covers YVA and Natura decisions and typical appeal periods in administrative court; cold storage keeps it cheap (≈ €20–40 per station-deployment) |
+| Compressed live stream | 3 months | Only a working copy; the lossless original replaces it |
+| Detections, reviews, reports, audit log | As long as the account exists | Small, and needed to defend results |
+| Telemetry | 2 years | For warranty and fault analysis |
+| Speech segments | Muted copies only after 30 days unless the customer needs the originals (REQ-P2) | Data minimisation |
+
+Evidence-grade projects can extend the object lock (e.g. to 10 years) before it
+expires.
 
 ## 12. Cost per station *(est.)*
 
 Assumptions: continuous 48 kHz recording, 4-week deployment, Reference upload
-mode, all channels uploaded after retrieval, 1-year retention.
+mode (Opus live), all channels uploaded losslessly after retrieval, retention
+as proposed in §11.3. A customer using the local-only option costs us only
+telemetry and device management (≈ €1/month).
 
 | Item | Per station-month | Notes |
 |---|---|---|
@@ -454,6 +514,12 @@ Decided by walto on 2026-11-02:
 - V1 counts and locates individual birds with multiple stations (§5.3).
 - Consultants and researchers are the first customers.
 - The kit is sold, not rented. Cloud use is still an ongoing service (§12).
+- Stations record continuously.
+- Customers own their data, including a local-only option (§11.3).
+- All three legal uses matter: YVA, Natura and permit monitoring.
+- Live upload is compressed, archive is lossless (§3.1.1, recommendation;
+  walto asked for the comparison).
+- walto has a toiminimi (sole trader business) for contracts and outreach.
 - Contacting the BirdNET team and the Finnish research group about licensing
   is approved; drafts are prepared for walto to review before sending.
 - Stations use solar plus battery, and have Bluetooth/Wi-Fi for phone setup.
@@ -461,8 +527,7 @@ Decided by walto on 2026-11-02:
 
 Still open:
 1. **Hosting:** Finnish provider (UpCloud), lowest cost (Hetzner) or AWS?
-2. **Retention:** how long do customers need raw audio kept (legal cases may
-   need years)?
+2. **Retention:** confirm the proposed defaults in §11.3.
 3. **Desktop OS:** is Windows the main platform for customers?
 4. **Pricing of the cloud service** for a sold kit: included for a first
    period, then a yearly subscription? (business doc)
