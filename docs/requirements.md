@@ -2,6 +2,8 @@
 
 Status: draft for review (step 1 of the plan). Owner: walto. Last updated 2026-11-02.
 
+Decisions from walto (2026-11-02): version 1 counts and locates individual birds using several stations together; consultants and researchers are the first customers, hobbyists come later; kits are sold, not rented; stations are solar plus battery powered; phone setup over Bluetooth or Wi-Fi is allowed; Luontopalvelut Flava (luontopalvelutflava.fi) is a candidate pilot partner.
+
 This document defines what the bird call kit must do for its buyers, which Finnish survey practices it has to fit, what makes its data trustworthy enough for legal and regulatory reports, and how it handles privacy. Hardware, edge software, cloud and business documents should trace their design choices back to the requirement IDs here (`REQ-…`).
 
 Priority words: **MUST** is required for the first sellable kit, **SHOULD** is expected unless there is a documented reason, **MAY** is optional or later.
@@ -24,13 +26,15 @@ A kit of one or more outdoor recording stations, each with several microphones, 
 | Scale | Several stations across a project area, repeated seasons | One to many stations, long series | One station |
 | Human review | Expert verifies every species that matters for the conclusions | Validates samples to estimate error rates | Optional, casual |
 
+Consultants and researchers are the first customers. Hobbyist needs stay in the design but come after version 1.
+
 Requirements that follow from this:
 
 - **REQ-B1 (MUST)** One product, three experience levels: a simple default view (species list, top recordings) and an expert view (all detections, scores, raw audio, metadata, audit trail). The data underneath is the same.
 - **REQ-B2 (MUST)** Report export for consultants: species, detection counts per station and day, survey effort (hours actually recorded per station), method description, model versions, and verification status, as PDF plus machine readable tables (CSV).
 - **REQ-B3 (MUST)** Raw audio export in an open lossless format (FLAC or WAV) with sidecar metadata (JSON), for researchers.
 - **REQ-B4 (SHOULD)** Export observations in Darwin Core form so they can go to FinBIF (Laji.fi) and GBIF. *(verify FinBIF import format and required fields)*
-- **REQ-B5 (MUST)** A first-time deployment by a non-expert takes under 30 minutes per station on site, guided by a phone app or printed card, and the station confirms by itself that it is recording, located and connected.
+- **REQ-B5 (MUST)** A first-time deployment by a field worker without electronics knowledge takes under 30 minutes per station on site, guided by a phone app over Bluetooth or Wi-Fi (printed card as backup), and the station confirms by itself that it is recording, located and connected.
 - **REQ-B6 (MUST)** Human verification workflow: an expert can mark each detection as confirmed, rejected or uncertain. The reviewer's name and time are stored, and reports state which results were verified.
 
 ## 3. Fitting Finnish survey practice
@@ -55,7 +59,7 @@ Acoustic recorders are an accepted complement to field surveys, but they do not 
 
 - **Level 1, presence:** species detected at station X on day Y. Always available.
 - **Level 2, activity index:** number of detections or number of minutes with detections per hour, per station. Comparable between stations and years if the hardware and settings are the same. Always available.
-- **Level 3, minimum number of individuals:** the number of birds of one species calling at the same time, estimated from simultaneous calls at different positions. Needs a microphone array with tight time synchronisation (see REQ-T2) and localisation software.
+- **Level 3, minimum number of individuals with positions:** the number of birds of one species calling at the same time, estimated by locating each caller from arrival time differences across microphones in several stations. Needs tight time synchronisation (REQ-T2), accurately surveyed station positions (REQ-L3) and localisation software. **Required for version 1.**
 - **Level 4, density or abundance:** needs a detection distance model per species. Research topic; MAY come later.
 
 - **REQ-C1 (MUST)** Every count in the app and in reports states its level (presence, activity index, minimum individuals) and the effort it is based on.
@@ -75,12 +79,13 @@ The goal: for any species claim in a report, anyone can follow it back to the ex
 ### 4.1 Time
 
 - **REQ-T1 (MUST)** Each station timestamps audio from a GNSS-disciplined clock (GPS PPS or equivalent). Absolute error to UTC under 10 ms during recording. Station logs the GNSS lock state, and any period without lock is flagged with the estimated drift.
-- **REQ-T2 (MUST if Level 3 counting is in scope)** All microphones in one array are sampled by the same clock, so inter-channel timing error is under 0.1 ms. Between stations, timing error is under 1 ms if cross-station localisation is wanted.
+- **REQ-T2 (MUST)** All microphones in one station are sampled by the same clock, so inter-channel timing error is under 0.1 ms. Between stations of the same kit, timing error is also under 0.1 ms (about 3 cm of sound travel), using GNSS PPS recorded in the audio stream so each sample has an exact UTC time. Localisation of individual birds across stations depends on this.
 - **REQ-T3 (MUST)** All stored times are UTC (ISO 8601); local time (Europe/Helsinki) is only for display. Sunrise and sunset are computed from the station position.
 
 ### 4.2 Location and setup
 
 - **REQ-L1 (MUST)** Station position from GNSS, stored with accuracy estimate, at deployment and periodically. A position change of more than a set threshold (moved or stolen) raises an alert.
+- **REQ-L3 (MUST)** For cross-station localisation, station and microphone positions are known to within 0.5 m relative to each other. Standard GNSS is not enough; the method (long GNSS averaging, RTK, or measuring distances on site) is for the hardware and edge documents to choose. Positions and their accuracy are stored with the deployment.
 - **REQ-L2 (MUST)** Deployment record: who deployed, when, photo of the setup, habitat note, microphone height, microphone geometry (as built), and mounting. Same at retrieval.
 
 ### 4.3 Audio quality
@@ -141,7 +146,7 @@ The stations record everything they hear, including people. In Finland this touc
 
 These are summarised here because they decide whether data exists at all. The hardware and edge software documents set the detailed specs.
 
-- **REQ-O1 (MUST)** Unattended operation for 28 days with continuous recording on all channels, in temperatures from -30 °C to +35 °C, through snow, rain and icing. Data loss from a full battery or storage must not happen silently.
+- **REQ-O1 (MUST)** Unattended operation for 28 days with continuous recording on all channels, in temperatures from -30 °C to +35 °C, through snow, rain and icing, powered by solar panel plus battery. The power budget must hold through the darkest Finnish winter weeks, where solar input is close to zero in the north. Data loss from a full battery or storage must not happen silently.
 - **REQ-O2 (MUST)** Station keeps recording when 4G is down and catches up manifest, status and tier 1 uploads when the connection returns. Local storage holds the whole deployment's full multichannel audio, since the SD cards are the archive of record (REQ-I7).
 - **REQ-O3 (MUST)** Remote status at least every hour when connected: recording state, battery, storage, temperature, GNSS lock, microphone health, last upload.
 - **REQ-O4 (MUST)** Remote configuration changes (schedule, gain) are logged in the audit log and take effect at a recorded time, so effort stays traceable.
@@ -149,17 +154,21 @@ These are summarised here because they decide whether data exists at all. The ha
 
 ## 7. Acceptance criteria for the first field pilot
 
-1. Three stations run 28 days at a real site, at least one deployment period below 0 °C.
-2. Recorded effort is 95% or more of scheduled time, and every gap is explained in the log.
-3. Every file in a sample of 100 traces from report to original audio with matching hashes, including files recovered from SD cards at the service visit and checked against manifests uploaded during the deployment.
-4. GNSS timing check: a test sound recorded by all microphones shows inter-channel error within REQ-T2.
-5. Model results for the pilot agree with an expert's review on a random sample, and precision per common species is reported.
-6. A hobbyist-level tester deploys a station from the guide alone in under 30 minutes.
+1. Three stations run 28 days at a real site with a pilot partner (candidate: Luontopalvelut Flava), at least one deployment period below 0 °C.
+2. A test sound played at known positions inside the station layout is located by the system within an agreed error (target 5 m), and simultaneous callers are counted correctly.
+3. Recorded effort is 95% or more of scheduled time, and every gap is explained in the log.
+4. Every file in a sample of 100 traces from report to original audio with matching hashes, including files recovered from SD cards at the service visit and checked against manifests uploaded during the deployment.
+5. GNSS timing check: a test sound recorded by all microphones shows inter-channel error within REQ-T2.
+6. Model results for the pilot agree with an expert's review on a random sample, and precision per common species is reported.
+7. A field worker without electronics knowledge deploys a station from the guide alone in under 30 minutes.
 
 ## 8. Open questions for walto
 
-1. Is Level 3 counting (minimum number of individuals from microphone arrays) required for the first kit, or are presence plus activity index enough for version 1? This drives clock, microphone and cost decisions.
-2. Which legal use matters most at launch: wind farm and YVA surveys, Natura assessments, permit monitoring, or something else? Do you know a consultant who could review this document?
-3. How long should raw audio be kept by default (for example 5 years for consultant projects)? This drives cloud storage cost.
-4. Continuous recording around the clock, or scheduled windows by default? Continuous gives the best data but needs more power in winter.
-5. Should our cloud host customer data (we become a processor with a DPA), or should consultants be able to keep everything on their own machines only?
+Answered on 2026-11-02: individual counting (yes, across stations), first customers (consultants and researchers), sales model (sell), power (solar plus battery), phone setup (yes), pilot partner (Luontopalvelut Flava).
+
+Still open:
+
+1. Which legal use comes first: wind farm YVA surveys, Natura assessments, or permit monitoring? This sets the report template and which species need validated performance first.
+2. How long should raw audio be kept by default (for example 5 years for consultant projects)? This drives cloud storage cost.
+3. Continuous recording around the clock, or scheduled windows by default? Continuous gives the best data but costs winter power.
+4. Should our cloud host customer data (we become a processor with a DPA), or should consultants also be able to keep everything on their own machines only?
