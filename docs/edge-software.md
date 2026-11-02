@@ -2,6 +2,8 @@
 
 Status: **Draft for step 1 (design)**. No code yet. Decisions marked **[Proposed]** need walto's review; items marked **[Open]** are waiting on answers or on another doc. Requirement IDs (REQ-…) refer to `docs/requirements.md` (PR #1). Hardware references (§x.y of hardware) refer to `docs/hardware.md` (PR #5). See §18 for traceability.
 
+**Decided by walto (2026-11-02):** version 1 must **count and locate individual birds across multiple stations**; stations use **solar plus battery**; **Bluetooth/Wi-Fi phone setup** is included. These shape §7.3, §8.3, §9.1 and §14.
+
 This version follows the hardware doc's **architecture B**: a low-power recorder MCU records around the clock, and a Linux module wakes only when needed. Prototype v0 is architecture A (Linux records everything), and the software is split so that v0 work carries over (§16).
 
 ## 1. Scope and principles
@@ -175,6 +177,16 @@ Hardware §4.2 gives the method; the software side:
 4. All stored times are UTC ISO 8601 (REQ-T3).
 5. The cloud does the precise cross-station alignment from the tables; nothing on the station resamples audio.
 
+### 7.3 Station positions for cross-station localisation
+
+Locating birds between stations needs each station's array position known far better than a normal GNSS fix (a few metres). Sound travels ~34 cm per ms, so a 2 m position error is as bad as a 6 ms timing error. [Proposed] three layers, best available is used and recorded:
+
+1. **Long GNSS averaging:** the recorder logs GNSS position continuously; the cloud averages over the deployment (typically ~1 m or better *(est., verify with the M10 in v0)*). If the module supports raw measurements, they are logged for post-processing against the National Land Survey's FinnRef reference stations (could reach decimetres *(verify)*).
+2. **Measured at setup:** the app accepts a surveyed position (RTK rover, or a tape measurement from a known point) and the array heading from the hardware's orientation sensor (hardware §4.3).
+3. **Acoustic self-survey:** each station's self-test chirp (hardware §3.4) is also scheduled so neighbouring stations hear it. With sample-exact PPS timing on both sides, the arrival times give inter-station distances directly, which the cloud uses to refine positions. Chirp times are coordinated by the cloud and ledgered.
+
+Position, its source and estimated accuracy go into every sidecar, so analysis knows which data is good enough for Level 3 counting.
+
 ## 8. Health and event detection (no species ID)
 
 ### 8.1 On the recorder, always (REQ-A4)
@@ -191,9 +203,20 @@ When Linux is up, `lb-detector` processes ingested files it has not seen yet:
 - **Noise and weather flags:** rain, wind, anthropogenic noise (traffic, aircraft, chainsaws) from spectral flatness, low-frequency energy and coherence.
 - **Per-minute acoustic indices** (e.g. ACI, NDSI) for the app's activity heatmap.
 
-The output is an event index used to prioritise uploads (§9.1) and to answer "anything interesting here?" before the full data arrives. It flags, it never deletes. CPU cost: a few minutes of CM4 time per day of audio *(est., confirm in v0)*. Thresholds are config.
+The output is an event index used to prioritise uploads (§9.1) and to pick events for localisation (§8.3) and to answer "anything interesting here?" before the full data arrives. It flags, it never deletes. CPU cost: a few minutes of CM4 time per day of audio *(est., confirm in v0)*. Thresholds are config.
 
 Speech detection (REQ-P1) runs in the cloud on whatever is uploaded; see §18.
+
+### 8.3 Coordinated multichannel clips for localisation
+
+Locating a bird needs the **same time window, all channels, from every station that heard it**. [Proposed] flow:
+
+1. Each station uploads its event index at each wake (small).
+2. The cloud finds events that overlap in time across neighbouring stations (allowing for sound travel time between them) and, optionally, the cloud species ID on the reference channel.
+3. The cloud requests those windows (all channels, lossless FLAC, PPS table) from each station; stations add them to the on-demand queue (§9.1 item 4).
+4. A per-project **localisation budget** (clips or MB per day) keeps this within the data and energy budget. Events of target species or high-priority windows go first.
+
+Full multichannel audio for everything remains on the SD cards, so a project can run complete localisation after the service visit.
 
 ## 9. Upload over 4G
 
@@ -204,7 +227,7 @@ Per project config, in priority order:
 1. **Always, via the supervisor (Linux off):** hourly status, alarms, the current chain head.
 2. **Always, at each Linux wake:** all new signed manifest entries and sidecars, health summaries and the event index (kilobytes to a few MB per day). The cloud then knows exactly which files exist and can verify any file that arrives later (REQ-I2, REQ-I3).
 3. **Default audio:** one **reference channel in FLAC** (about 8 GB/day) for cloud species ID, lossless so cloud and local results stay identical (REQ-A1, REQ-R*). Under a tight data or energy budget, the project can choose Opus at ~64-96 kbit/s instead (about 1 GB/day), marked as a listening/ID copy, never the archive.
-4. **On demand:** multichannel clips or time ranges requested from the app (e.g. events for localisation, Level 3 counting).
+4. **On demand / localisation:** multichannel clips the cloud requests for cross-station localisation (§8.3), and time ranges requested from the app.
 5. **When power and coverage allow:** the full multichannel archive, oldest first.
 6. **At service visit:** the SD cards are ingested in the cloud and every file is verified against the signed chain.
 
@@ -258,7 +281,8 @@ Goal: anyone receiving the data can verify that **a file was recorded by station
 2. Station self-tests (each mic with the chirp, both cards, GNSS, modem) and shows the result on a status LED.
 3. Buyer scans the station's QR code in the app; the station is claimed to their project using its device certificate.
 4. App shows live levels per mic (short clips uploaded), the GNSS position, and the recording plan. Buyer confirms; calibration with the acoustic calibrator is guided by the app for consultant kits (REQ-A3).
-5. Without 4G at the spot, setup should work through the phone over BLE or Wi-Fi. **[Open: hardware doc's CM4 has no wireless; needs a decision.]**
+5. Without 4G at the spot, setup works through the phone (approved by walto). [Proposed] **BLE on the supervisor** (always available, low power) for claiming, self-test results, live levels and config; **Wi-Fi on the Linux module** (CM4 variant with wireless, hotspot only on request) for downloading clips or larger data on site. Both are off unless a button press or the app wakes them, and every local session is ledgered. **[Hardware to confirm parts: hardware doc currently lists a CM4 without wireless.]**
+6. For multi-station projects, the app walks through station placement and records surveyed positions and array heading (§7.3).
 
 ## 15. Testing strategy
 
@@ -322,12 +346,11 @@ Because the file format, chain and Linux daemons are the same in v0 and v1, ever
 | REQ-O3 hourly status | §11 via supervisor |
 | REQ-O4 config changes logged with effective time | §12 |
 | REQ-O5 1-20+ stations | Nothing station-to-station on the device; fleet handled in cloud (§12, §13) |
+| Level 3 counting, cross-station localisation (walto, 2026-11-02) | §7 timing, §7.3 positions, §8.3 coordinated clips |
 
 ## 19. Open questions for walto
 
-Several earlier questions are answered by the hardware doc (4-6 mic tetrahedral array, LTO pack with no solar needed, CM4 as Linux module). Remaining:
+Answered: multi-mic purpose (locate across stations), power (solar + battery), phone setup (yes), Linux module (CM4). Remaining:
 
-1. **What are the multiple mics mainly for:** direction-finding at one station (Level 3 counting), locating birds across stations, or both? This decides how much multichannel audio must be uploaded on demand versus only collected at service visits.
-2. **Upload default:** is one lossless reference channel (about 8 GB/day, ~240 GB/month per station) acceptable for the SIM cost, or should the default be compressed (about 1 GB/day) with lossless on demand?
-3. **Phone setup without 4G:** add BLE to the station (e.g. a small BLE module on the supervisor), or accept that setup needs 4G coverage?
-4. **SD card encryption:** do consultants need cards encrypted (protects speech recordings if a card is lost, REQ-P5), accepting that cards are then only readable with our tool?
+1. **Upload default:** is one lossless reference channel (about 8 GB/day, ~240 GB/month per station) acceptable for the SIM cost, or should the default be compressed (about 1 GB/day) with lossless on demand?
+2. **SD card encryption:** do consultants need cards encrypted (protects speech recordings if a card is lost, REQ-P5), accepting that cards are then only readable with our tool?
