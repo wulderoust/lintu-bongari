@@ -8,6 +8,20 @@ working assumptions to be replaced once the hardware BOM and cloud costs are kno
 
 ---
 
+## 0. Decisions from walto (2026-11-02)
+
+| Topic | Decision | Effect on this doc |
+|---|---|---|
+| Counting | Version 1 **counts and locates individual birds** using multiple time-synced stations | Localization is the headline feature; the smallest professional kit is 4 stations |
+| First customers | **Consultants and researchers first**; hobbyists later | Hobbyist tier stays phase 2 |
+| Sales model | **Sell** (no rental at launch) | Rental tier removed; hardware + active-month subscription |
+| Licensing | OK to contact BirdNET team and University of Helsinki | Classifier licence added as a cost line; outreach drafted for walto to approve before sending |
+| Power | **Solar + battery** | Higher BOM and price; solar panel and mount part of the kit |
+| Phone setup | Stations **may include Bluetooth/Wi-Fi** | Setup flow uses phone pairing; adds radio tests to CE |
+| Pilot | **Luontopalvelut Flava Oy** (luontopalvelutflava.fi) as candidate pilot partner | See section 9 |
+
+---
+
 ## 1. One-line positioning
 
 > A complete, remotely accessible, winter-proof bird-sound monitoring kit for Finland that
@@ -34,12 +48,15 @@ it; volumes are small enough for walto to build and support). Offer hobbyists a 
 
 ### "Different scales" maps to three kit sizes
 - **Single station:** one point, presence and activity.
-- **Survey kit (3-6 stations):** a consultant's typical site, transects or several habitats.
+- **Localization kit (4+ stations):** a consultant's typical site; counts and locates individuals.
 - **Network (10+ stations):** research projects, wind-farm areas, long-term monitoring.
 
-Multi-microphone stations also allow **direction-of-arrival and, with synchronized stations,
-localization**, which is the key to *counting individuals* rather than only listing species.
-This is the strongest technical differentiator; see section 4.
+Multi-microphone stations give **direction of arrival**, and several GNSS-time-synced stations
+together give **localization of individual birds**. Version 1 must do this (walto, 2026-11-02):
+it is what lets the kit *count individuals and territories* rather than only list species, and it
+is the strongest technical differentiator. Practical consequence for sales: localization needs at
+least 3, preferably 4, stations hearing the same bird, so the **4-station kit is the base
+professional product**, and single stations are sold as add-ons or for presence/activity only.
 
 ---
 
@@ -85,6 +102,9 @@ privacy/speech redaction and EU hosting REQ-P1–P5, 28-day operation at -30 °C
 - **Data integrity for legal use:** every recording has GPS time, station ID, location, firmware
   and model version, and a cryptographic hash/signature created on the device. Raw audio kept
   (or at least retained for the detections used in a report) so a human can verify.
+- **Localization (v1):** station clocks synced to GNSS time well enough for time-difference-of-
+  arrival between stations, station positions surveyed at deployment, and reports that show
+  individuals/territories with an uncertainty estimate, not just a point.
 - **Human verification workflow:** reports must separate "AI detection" from "expert-verified".
   Authorities will not accept unverified AI counts as the sole evidence for a while.
 - **Remote health telemetry** at least daily, even if audio upload is limited.
@@ -106,6 +126,7 @@ pilot).
 | Area | Legislation | What it means for us | Effort |
 |---|---|---|---|
 | **Radio, EMC, electrical safety** | Radio Equipment Directive **2014/53/EU (RED)** | The station contains 4G, GNSS (and maybe Bluetooth/Wi-Fi), so RED covers it. RED also absorbs EMC and safety (LVD) requirements. Use a **pre-certified 4G module** (e.g. Quectel/u-blox/Telit) and follow its integration guide; still test the whole product: EN 301 908-1/-13 (LTE), EN 303 413 (GNSS), EN 301 489-1/-19/-52 (EMC), EN 62368-1 (safety), EN 62311 or EN 50665 (RF exposure). | High. Budget **€8-20k (est.)** at a test lab (e.g. in Finland or Estonia) for the first product, less if module certificates are reused. |
+| **Bluetooth / Wi-Fi for phone setup** | RED, EN 300 328 (2.4 GHz), EN 301 489-17 (EMC) | Adds two test standards. Using a pre-certified BLE/Wi-Fi module keeps it cheap. Pairing must not use a default password (EN 18031). | Low-medium |
 | **Cybersecurity** | RED Delegated Regulation (EU) **2022/30**, harmonised standard **EN 18031-1/-2/-3**, mandatory since 1 Aug 2025 | An internet-connected device: no default passwords, secure updates, protection of network and personal data. Some EN 18031 options carry restrictions; if we hit one, a notified body is needed. | Medium. Design it in from day one (Edge software thread). |
 | **Cyber Resilience Act** | Regulation **(EU) 2024/2847** | Vulnerability reporting obligations apply from **11 Sep 2026**, full requirements from **11 Dec 2027**. Our launch is likely around then, so plan for: SBOM, vulnerability handling process, security updates for the support period. | Medium, mostly process. |
 | **Hazardous substances** | **RoHS 2011/65/EU**, **REACH** | Buy RoHS-compliant parts, collect supplier declarations, keep in technical file. | Low. |
@@ -128,27 +149,32 @@ are risky; free loans to research partners as "prototypes not for sale" are the 
 Principle (from walto): price follows quality; customers must be able to trust the product.
 Recurring revenue is needed because every station uses 4G data and cloud compute every day.
 
-### Model: hardware + subscription, with rental for consultants
-Consultants run 2-4 week surveys in spring and autumn. Many will prefer **renting** a ready kit
-for a season over buying. Rental also lets walto keep control of hardware quality and firmware.
+### Model: sell hardware + subscription
+Decision: **sell, no rental at launch.** Customers own the stations and pay a subscription for
+4G data, cloud analysis, localization and reports. Billing is per *active month*, so seasonal
+users (2-4 week surveys in spring and autumn) only pay while stations are deployed. Rental could be
+revisited later if pilots show consultants want it.
 
 | Tier | Who | Hardware | Subscription (incl. 4G data, cloud ID, storage) | Notes |
 |---|---|---|---|---|
 | **Kotipiha / Home** (phase 2) | Hobbyists | 1 station **€390-490** (est.) | **€6-10 / month** | Simplified station (maybe Wi-Fi or 4G), app, species lists, laji.fi sharing |
-| **Pro station** | Researchers, small consultants | **€1,200-1,800** per station (est.) | **€25-40 / station / month** while deployed | Full multi-mic, raw audio, exports, API |
-| **Survey kit** | Consultants | 4 stations + case + batteries + charger **€5,500-7,500** (est.) | **€90-140 / month** for the kit while active | Report templates, verification tools, priority support |
-| **Rental** | Consultants, one-off projects | Included | **€250-400 per station per 4-week deployment** (est.) | Shipped ready-configured, returned in the same case |
+| **Pro station** (add-on) | Researchers, extending a kit | **€1,300-1,900** per station incl. solar (est.) | **€25-40 / station / month** while deployed | Full multi-mic, raw audio, exports, API |
+| **Localization kit** (base product) | Consultants, researchers | 4 stations + solar panels + batteries + mounts + case **€6,000-8,000** (est.) | **€100-160 / month** for the kit while active | Individual counts/territory maps, report templates, verification tools, priority support |
 | **Desktop licence** | Researchers who will not use the cloud | Any | **€300-600 / year** (est.) | Analysis runs on their computer; no audio leaves their control |
 
 Subscription is billed only while stations are deployed ("active months"), which fits seasonal use.
 
 ### Cost sanity check (est., to be replaced with real numbers)
-- Station BOM: €250-450 (multi-mic array, MCU/SBC, 4G modem, GNSS, enclosure, cold-rated battery,
-  solar option). Hardware price at 3-4x BOM is normal for small-volume professional gear.
+- Station BOM: €300-500 (multi-mic array, MCU/SBC, 4G modem, GNSS, BLE/Wi-Fi, enclosure,
+  cold-rated battery, solar panel and charge controller). Hardware price at 3-4x BOM is normal for small-volume professional gear.
 - 4G data: uploading compressed detection clips and health data is ~1-3 GB/month per station,
   about €2-6/month on IoT plans. Uploading continuous raw audio is 10-50x more, so it should be an
   add-on, not the default.
 - Cloud ID compute and storage: €2-8 per station per month (est.).
+- **Classifier licence:** BirdNET's models are licensed CC BY-NC-SA, so commercial use needs a
+  licence from the BirdNET team (Cornell / TU Chemnitz), or a model trained by us or licensed from
+  the University of Helsinki group. Unknown cost; could be a per-station fee or a flat fee. Must be
+  settled before pricing is final.
 - Margin on subscription needs to fund support and model updates.
 
 ### Further revenue
@@ -190,7 +216,7 @@ with gloves on, in snow, without a laptop.**
 **At the site**
 3. Strap or screw the station to a tree/pole (included strap and bracket).
 4. Connect the battery and press one button. The LED shows: searching GPS/4G → OK (green).
-5. Scan the station's QR code with the phone app, which records location, a photo of the site and
+5. Open the phone app; it pairs with the station over Bluetooth (QR code on the lid identifies it), which records location, a photo of the site and
    a note (or does it automatically from the station's GPS).
 6. The app confirms "Recording, connected, battery estimate 26 days". Done.
 
@@ -215,6 +241,11 @@ hand, sensible defaults for Finnish seasons (spring migration, breeding, autumn,
    use in spring 2027 migration/breeding season in exchange for feedback and a reference.
 2. **Validation study:** compare kit results with point counts by experienced birders at the
    pilot sites. Publish the result; this is the main sales asset for regulatory buyers.
+   **Candidate: Luontopalvelut Flava Oy** (Helsinki, founded 2023). They do bird surveys from
+   early-spring owl and grouse counts to autumn migration, for zoning, construction and permits
+   across Finland, list wind and solar projects as references, and do golden eagle tracking and
+   collision modelling. Localization of individual birds fits their work directly. walto makes
+   the first contact; a one-page pilot proposal can be drafted for walto to review.
 3. **Channels:** direct sales to consultancies, BirdLife Suomi and regional bird societies,
    Luke/SYKE/universities, trade fairs, later Nordic resellers (Sweden, Norway, Estonia).
 4. **Expansion:** Sweden and Norway share most species and similar winter conditions; models and
@@ -224,14 +255,13 @@ hand, sensible defaults for Finnish seasons (spring migration, breeding, autumn,
 
 ## 10. Open questions for walto
 
-1. Do we launch for **consultants and researchers first**, with hobbyists as a later product?
-2. **Sell, rent, or both?** Rental suits 2-4 week surveys but needs stock and logistics.
-3. Do you have (or plan) a **company** (Oy / toiminimi)? CE responsibility, WEEE/battery
+Answered on 2026-11-02: see section 0. Still open:
+
+1. Do you have (or plan) a **company** (Oy / toiminimi)? CE responsibility, WEEE/battery
    registration and warranty sit with the manufacturer.
-4. Which **legal/regulatory uses** do you have in mind first (wind-power YVA, Natura
-   assessments, forest-use planning, something else)? This sets the reporting format.
-5. Do you know any **consultants or researchers** who could be pilot partners?
-6. Target **price for a 4-station survey kit**: is €5,500-7,500 in the range you imagined?
+2. Which **legal use** comes first: wind-power YVA, Natura assessments, or permit monitoring?
+   This sets the report format.
+3. Is about **€6,000-8,000 for a 4-station localization kit** in the range you imagined?
 
 ---
 
