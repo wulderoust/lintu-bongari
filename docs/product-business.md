@@ -19,6 +19,13 @@ working assumptions to be replaced once the hardware BOM and cloud costs are kno
 | Power | **Solar + battery** | Higher BOM and price; solar panel and mount part of the kit |
 | Phone setup | Stations **may include Bluetooth/Wi-Fi** | Setup flow uses phone pairing; adds radio tests to CE |
 | Pilot | **Luontopalvelut Flava Oy** (luontopalvelutflava.fi) as candidate pilot partner | See section 9 |
+| Company | walto has a **toiminimi** | Recommend forming an Oy before the first sale (section 5a) |
+| Legal uses | **All**: wind-power YVA, Natura assessments and permit monitoring | Report templates for all three; YVA first in practice because of volume (section 9) |
+| Recording | **Continuous** | Drives storage, power and data cost |
+| Data ownership | **The customer owns the data** | We act only as processor; full export and delete; desktop-only option (section 4) |
+| Polar night (Lapland) | Not in v1; a later version | v1 is specified for southern and central Finland; in midwinter it still runs mostly on battery |
+| Battery weight | 17 kg per station accepted, smaller preferred | Kit weight and shipping by road, not air |
+| Kit price | €6-8k is "somewhere there" | **Conflicts with parts cost; see section 6 and the open decision** |
 
 ---
 
@@ -111,6 +118,11 @@ privacy/speech redaction and EU hosting REQ-P1–P5, 28-day operation at -30 °C
 - **Configurable recording schedules** (dawn chorus, nocturnal migration, continuous).
 - **Open exports:** WAV/FLAC, CSV/JSON detections, Raven selection tables, and the FinBIF/laji.fi
   format.
+- **Customer owns the data (walto, 2026-11-02):** contracts state the customer owns all audio,
+  detections and reports. We process data only on their instructions (GDPR processor, DPA
+  included), never reuse it for model training without opt-in, offer full export at any time in
+  open formats, and delete on request or at contract end. The desktop licence lets a customer keep
+  everything on their own machines, with the station uploading only health data to us.
 - **Privacy:** outdoor recording can capture human speech, which is personal data under GDPR.
   Needed: a speech-detection filter that drops or masks speech before upload, a privacy notice
   sticker on each station, and a data processing agreement (DPA) for business customers.
@@ -138,6 +150,16 @@ pilot).
 | **Data protection** | **GDPR**, Finnish Data Protection Act | We process audio that may contain speech. Privacy by design (section 4), DPA template, data hosted in the EU. | Medium. |
 | **SIM / connectivity** | Operator terms | Use an EU IoT/M2M SIM with roaming across Finnish operators (Elisa, Telia, DNA) for coverage in remote areas. | Low. |
 
+### 5a. Company form and liability
+
+walto runs a **toiminimi** (sole trader). That is fine for development and pilots, but as the
+manufacturer selling CE-marked electronics, a sole trader is **personally liable without limit**
+under the Product Liability Act (tuotevastuulaki) and for warranty claims. A battery fire or a
+failed regulatory survey could reach personal assets. Recommendation: **form an Oy (osakeyhtiö,
+minimum share capital €0) before the first sale**, take **product liability and professional
+liability insurance**, and register the Oy (not the toiminimi) as manufacturer for CE, WEEE and
+batteries so registrations do not have to be moved later.
+
 **Practical path:** design with pre-certified modules, do an EMC/radio **pre-compliance scan** on
 the prototype (step 3), then full testing on the pilot hardware (step 4). Paid pilots before CE
 are risky; free loans to research partners as "prototypes not for sale" are the usual route.
@@ -158,18 +180,40 @@ revisited later if pilots show consultants want it.
 | Tier | Who | Hardware | Subscription (incl. 4G data, cloud ID, storage) | Notes |
 |---|---|---|---|---|
 | **Kotipiha / Home** (phase 2) | Hobbyists | 1 station **€390-490** (est.) | **€6-10 / month** | Simplified station (maybe Wi-Fi or 4G), app, species lists, laji.fi sharing |
-| **Pro station** (add-on) | Researchers, extending a kit | **€1,300-1,900** per station incl. solar (est.) | **€25-40 / station / month** while deployed | Full multi-mic, raw audio, exports, API |
-| **Localization kit** (base product) | Consultants, researchers | 4 stations + solar panels + batteries + mounts + case **€6,000-8,000** (est.) | **€100-160 / month** for the kit while active | Individual counts/territory maps, report templates, verification tools, priority support |
+| **Pro station** (add-on) | Researchers, extending a kit | **€3,500-5,000** per station incl. solar (est., see below) | **€25-40 / station / month** while deployed | Full multi-mic, raw audio, exports, API |
+| **Localization kit** (base product) | Consultants, researchers | 4 stations + solar panels + batteries + mounts + case: **see price problem below** | **€100-160 / month** for the kit while active | Individual counts/territory maps, report templates, verification tools, priority support |
 | **Desktop licence** | Researchers who will not use the cloud | Any | **€300-600 / year** (est.) | Analysis runs on their computer; no audio leaves their control |
 
 Subscription is billed only while stations are deployed ("active months"), which fits seasonal use.
 
-### Cost sanity check (est., to be replaced with real numbers)
-- Station BOM: €300-500 (multi-mic array, MCU/SBC, 4G modem, GNSS, BLE/Wi-Fi, enclosure,
-  cold-rated battery, solar panel and charge controller). Hardware price at 3-4x BOM is normal for small-volume professional gear.
-- 4G data: uploading compressed detection clips and health data is ~1-3 GB/month per station,
-  about €2-6/month on IoT plans. Uploading continuous raw audio is 10-50x more, so it should be an
-  add-on, not the default.
+### The price problem: €6-8k does not cover the parts
+
+The hardware design (`docs/hardware.md`, PR #5) estimates **€1,450-2,650 per station** at
+prototype quantities, plus **€750-1,500 per kit** for shared items (survey GNSS, calibrator).
+A 4-station kit is therefore **€6,600-12,100 in parts alone**. The largest items are the LTO
+winter battery and the storage.
+
+Selling at €6-8k would lose money on every kit before labour, certification, warranty and support.
+Small-volume professional electronics usually sell at **2.5-4x parts cost**. Options:
+
+| Option | Kit price (4 stations) | What it means |
+|---|---|---|
+| **A. Price by real cost** | **€16,000-22,000** (est.) | Keeps the full design (4 mics, LTO, solar, 2 TB). Still competitive for consultants: one avoided field day costs a consultancy roughly €600-1,000 (est.), and a kit covering 2-3 surveys a season replaces many visits. Comparable professional array setups (4 high-end recorders + GPS sync + software) are in the €8-15k range without any 4G or service. |
+| **B. Design to cost** | **€9,000-12,000** (est.) | Target parts **€700-900 per station**: cheaper battery (LiFePO4 for summer, LTO as winter add-on), 1 TB storage, fewer shared items, volume pricing. Requires changes in the hardware design during step 2. |
+| **C. Both** | Launch at A, move to B | Pilots and first customers on the full design at price A; a cost-reduced v2 brings the price down. |
+
+**Recommendation: C.** Quality and trust come first (walto's rule), the first customers are
+professionals who value data over price, and a lower price can follow once real BOM and volume
+are known. The €6-8k target is reachable only after cost reduction and at higher volume.
+
+### Other running costs (est.)
+- 4G data: with continuous recording, the hardware/edge plan uploads one reference channel in FLAC
+  (about 8 GB/day, ~240 GB/month per station) plus manifests and clips; the full multichannel
+  archive stays on the SD cards. 240 GB/month costs roughly €15-40/month per station on Finnish
+  unlimited/IoT plans (est., verify with Elisa/Telia/DNA business pricing). A lossy codec (e.g.
+  Opus at high bitrate, ~30 GB/month) would cut this a lot; whether that is acceptable for ID and
+  legal use is being checked in the Edge/Cloud threads. Subscription prices above assume the
+  cheaper case and must rise if lossless upload is the default.
 - Cloud ID compute and storage: €2-8 per station per month (est.).
 - **Classifier licence:** BirdNET's models are licensed CC BY-NC-SA, so commercial use needs a
   licence from the BirdNET team (Cornell / TU Chemnitz), or a model trained by us or licensed from
@@ -239,16 +283,19 @@ hand, sensible defaults for Finnish seasons (spring migration, breeding, autumn,
 
 1. **Pilot partners (step 4):** 1-2 consultancies and 1 research group, free or heavily discounted
    use in spring 2027 migration/breeding season in exchange for feedback and a reference.
-2. **Validation study:** compare kit results with point counts by experienced birders at the
-   pilot sites. Publish the result; this is the main sales asset for regulatory buyers.
    **Candidate: Luontopalvelut Flava Oy** (Helsinki, founded 2023). They do bird surveys from
    early-spring owl and grouse counts to autumn migration, for zoning, construction and permits
    across Finland, list wind and solar projects as references, and do golden eagle tracking and
    collision modelling. Localization of individual birds fits their work directly. walto makes
    the first contact; a one-page pilot proposal can be drafted for walto to review.
-3. **Channels:** direct sales to consultancies, BirdLife Suomi and regional bird societies,
+2. **Validation study:** compare kit results with point counts by experienced birders at the
+   pilot sites. Publish the result; this is the main sales asset for regulatory buyers.
+3. **Legal uses:** all three are in scope (wind-power YVA, Natura assessments, permit
+   monitoring). Report templates for each; wind-power YVA has the most survey volume in Finland,
+   so it gets the first template and pilot focus.
+4. **Channels:** direct sales to consultancies, BirdLife Suomi and regional bird societies,
    Luke/SYKE/universities, trade fairs, later Nordic resellers (Sweden, Norway, Estonia).
-4. **Expansion:** Sweden and Norway share most species and similar winter conditions; models and
+5. **Expansion:** Sweden and Norway share most species and similar winter conditions; models and
    UI languages carry over.
 
 ---
@@ -257,11 +304,9 @@ hand, sensible defaults for Finnish seasons (spring migration, breeding, autumn,
 
 Answered on 2026-11-02: see section 0. Still open:
 
-1. Do you have (or plan) a **company** (Oy / toiminimi)? CE responsibility, WEEE/battery
-   registration and warranty sit with the manufacturer.
-2. Which **legal use** comes first: wind-power YVA, Natura assessments, or permit monitoring?
-   This sets the report format.
-3. Is about **€6,000-8,000 for a 4-station localization kit** in the range you imagined?
+1. **Kit price vs parts cost** (section 6): price by real cost (~€16-22k), redesign for cost
+   (~€9-12k), or launch at the first and move to the second (recommended)?
+2. Will you form an **Oy** before the first sale (section 5a)?
 
 ---
 
