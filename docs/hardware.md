@@ -1,6 +1,6 @@
 # Recording station hardware
 
-Status: draft for review (step 1 of the plan). Owner: walto (hardware build), Claude (design support and firmware). Last updated 2026-11-02 (rev. 3: individual-bird localisation and phone setup in v1 scope; winter battery split into two packs; v1 winter scope is southern and central Finland; build plan for a 3D printer plus assembly services).
+Status: draft for review (step 1 of the plan). Owner: walto (hardware build), Claude (design support and firmware). Last updated 2026-11-02 (rev. 4: design-to-cost series parts list (section 9.4) and build from pre-made parts (section 12); rev. 3: individual-bird localisation and phone setup in v1 scope; winter battery split into two packs; v1 winter scope is southern and central Finland; build plan for a 3D printer plus assembly services).
 
 This document proposes the hardware for one recording station and for kits of 1 to N stations. It traces choices back to `docs/requirements.md` (`REQ-…`). Numbers marked *(est.)* are engineering estimates that the prototype must measure. Numbers marked *(verify)* come from datasheets or vendor pages and need checking against the exact part revision before the design is frozen.
 
@@ -16,7 +16,7 @@ This document proposes the hardware for one recording station and for kits of 1 
 - **Locating individual birds (version 1 scope):** stations are sample-synchronised by GNSS, and each array gives a direction to every call. Calls heard by several stations can be located on a map and simultaneous callers counted. This needs station positions to about 10 cm and array headings to about 1 to 2°. A shared survey GNSS receiver in each kit gives the positions, and an **acoustic self-survey** (stations chirp to each other) checks positions and headings. Section 4.4 covers this.
 - **Phone setup:** a Bluetooth Low Energy chip (which is also the supervisor MCU) lets a phone app set up and check a station. The Linux module adds Wi-Fi on demand for live listening and fast file download (section 6.5).
 - **Integrity:** a secure element on the station signs the hash-chained manifests (REQ-I1, REQ-I2).
-- **Rough cost** of one complete station at prototype quantities: **€1,450 to €2,650** *(est.)*, plus about €750 to €1,500 per kit for shared items such as the survey GNSS and calibrator, of which the power pack and storage are the largest swing items. Section 9 has the parts list.
+- **Cost:** about €1,450 to €2,650 per station at prototype quantities *(est.)*. The series version (section 9.4) comes to about **€740 to 1,110 per station with LTO, or €630 to 990 with sodium-ion cells**, against a target of €700 to 900. The target is reachable if sodium-ion passes the cold test, and only at the low end of the estimates with LTO. **With pre-made parts only (walto's choice for now) it is about €170 to 300 per station higher, so the target needs one custom board before series sales (section 12.2).**
 
 The biggest open issue is **how much audio goes over 4G** (section 6.4). Uploading the full 4-channel archive in winter costs more energy and data than the station can afford, so this design treats the on-station disk as the archive of record and uploads signed manifests plus a reduced stream. This needs agreement with the Requirements, Edge and Cloud threads.
 
@@ -411,6 +411,56 @@ A 6S1P pack saves about €150 to 270 and 8 kg. Two 6S1P packs instead of one 6S
 
 ---
 
+### 9.4 Design to cost: series version
+
+Target from the business plan (PR #2, section 6): a 4-station localisation kit sells for about €9,000 to 12,000, so parts should be about **€700 to 900 per station** plus shared kit items. The quality claims stay fixed: 28 days of continuous recording at -30 °C, localisation accuracy (section 4.4), and signed data (REQ-I1, REQ-I2).
+
+The prototype prices above are for 1 to 5 units. This list is for a series of about 50 to 100 stations, with the cost-down choices below. *(All est.; to be confirmed with supplier quotes in step 3.)*
+
+**Cost-down choices that keep the quality claims:**
+
+| Change | Saves per station *(est.)* | Effect on quality |
+|---|---|---|
+| Linux module: Raspberry Pi Zero 2 W (has Wi-Fi/BT) instead of CM4 | €35 to 55 | none for recording, since Linux only runs on demand; pre-heat before boot in deep cold |
+| Europe-only LTE Cat 4 modem (Quectel EC25-E class) instead of the global EG25-G | €10 to 25 | none in Finland |
+| One combined LTE + GNSS antenna puck instead of separate antennas | €20 to 40 | none |
+| 50 Wp panel instead of 100 Wp | €30 to 50 | none: winter sizing ignores solar anyway, and 50 Wp covers the load from February to October |
+| Own power-pack PCB (MPPT, BMS, fuel gauge) instead of Victron + commercial BMS | €60 to 100 | same function, rated -40 °C |
+| Archive at 16 bit instead of 24 bit, 2 × 512 GB cards | €60 to 250 | none measurable: the mics' own noise (SNR about 73 dB) sits well above the 16-bit floor (96 dB) at a fixed, correctly set gain. REQ-A1 allows 16 bit |
+| Fewer bulkhead connectors (one multi-pin connector for the array head) | €20 to 40 | none |
+| Battery: **sodium-ion cells** instead of LTO, *if they pass the cold test* | €100 to 250 | must still give 28 days at -30 °C; also about 5 to 7 kg lighter per station |
+
+Sodium-ion cells are now made in volume (CATL, HiNa and others). They are reported to keep most of their capacity well below -20 °C and cost less per Wh than LTO, with higher energy density *(verify cold charge and discharge limits per cell datasheet)*. They are the most promising way to cut both cost and weight. The prototype will test one sodium-ion pack against an LTO pack side by side, outdoors in January. LTO stays the fallback.
+
+**Series parts list, one station:**
+
+| Block | LTO version | Sodium-ion version |
+|---|---|---|
+| Mics and 4 pods (moulded or printed housings, membranes, heaters, cables) | €55 to 80 | €55 to 80 |
+| Audio front end (2 ADCs, TCXO, LDOs) | €12 to 18 | €12 to 18 |
+| Recorder MCU, BLE supervisor, RTC, power monitor, secure element | €20 to 30 | €20 to 30 |
+| Archive storage, 2 × 512 GB | €60 to 100 | €60 to 100 |
+| Linux module (Pi Zero 2 W) | €18 to 22 | €18 to 22 |
+| 4G modem (EC25-E class) + industrial SIM holder | €25 to 35 | €25 to 35 |
+| GNSS M10 module | €10 to 15 | €10 to 15 |
+| IMU, weather sensors, self-survey emitter | €20 to 30 | €20 to 30 |
+| Carrier PCB, fabricated and assembled | €40 to 70 | €40 to 70 |
+| Power tree on carrier | €12 to 18 | €12 to 18 |
+| Enclosure, insulation, vent, connectors | €45 to 70 | €45 to 70 |
+| Array frame, combined antenna puck, mounting kit, misc. | €60 to 90 | €60 to 90 |
+| **Station head subtotal** | **€377 to 578** | **€377 to 578** |
+| Battery cells, about 1.1 kWh in two packs | €220 to 320 | €110 to 200 |
+| Two pack PCBs (BMS, MPPT on one, fuel gauge, ID) and boxes | €90 to 140 | €90 to 140 |
+| 50 Wp panel, near-vertical bracket, cables | €50 to 75 | €50 to 75 |
+| **Power subtotal** | **€360 to 535** | **€250 to 415** |
+| **Station total** | **€737 to 1,113** | **€627 to 993** |
+
+**Shared kit items at series prices:** survey GNSS €250 to 400, calibrator €250 to 500, cases and spares €100 to 200, so about **€600 to 1,100 per kit**.
+
+**4-station localisation kit, parts:** about **€3,550 to 5,550 with LTO**, or **€3,100 to 5,050 with sodium-ion**.
+
+**Verdict:** the €700 to 900 per station target is **reachable with sodium-ion cells**, and **only at the low end of the estimates with LTO**. A realistic midpoint with LTO is about €900 to 950 per station, which is €50 to 250 over target. The decisive unknowns are cell prices at volume and whether sodium-ion meets the cold test. Neither can be settled before the prototype. Lower-quality options were not used: fewer mics, no heaters, a smaller winter battery, or no secure element would each break a quality claim. If the January cold test rules out sodium-ion, the kit price should be revisited, as the business plan already allows.
+
 ## 10. Trade-offs at a glance
 
 | Decision | Chosen | Alternative | Why |
@@ -438,22 +488,49 @@ A 6S1P pack saves about €150 to 270 and 8 kg. Two 6S1P packs instead of one 6S
 6. **CM4 booting at -30 °C.** Cold-boot tests with and without the pre-heater. Fallback: industrial SoM.
 7. **4G coverage at remote sites.** Log signal quality in the field pilot; directional antenna accessory.
 
-**Cold testing without a chamber:** a chest freezer (about -18 to -25 °C) is enough for early tests of pods, icing and battery discharge. Real -30 °C tests can be done outdoors in central or northern Finland from December to February, logging temperature next to the station. A rented climate chamber (for example at a university or a test lab such as VTT, *(verify availability and cost)*) is needed once, before sale, for a documented -30 °C / +35 °C test.
+Cold testing is planned in section 12.3.
 
 ---
 
-## 12. Prototype path (input for step 3)
+## 12. Building from pre-made parts (walto's decision, 2026-11-02)
 
-**How it gets built with a 3D printer and no SMD soldering tools:**
-- **v0 uses only ready-made modules and evaluation boards** with connectors and jumper wires, so no fine soldering is needed.
-- **Custom PCBs are ordered fully assembled** from a PCB assembly service (for example JLCPCB or PCBWay, which place the small QFN chips such as the ADCs and the radio module). Typical cost is about €150 to 300 per board at 5 units *(est.)*, as already in the parts list. Only connectors and cables are fitted by hand.
-- **PCB design** is done in KiCad (free). Claude can write schematics notes, part selections, pin maps and design checks; the layout is done by walto or a freelance PCB designer. This is a decision for step 2.
-- **The 3D printer makes** the mic pod housings, array hub, brackets, cable strain reliefs and the battery box inserts, in ASA (UV- and cold-resistant). PETG is fine for indoor fixtures. Final production parts can move to injection moulding or machining later.
-- **The LTO packs** for prototypes are built from cells with welded or bolted busbars and a commercial BMS. Cells with threaded terminals (bolt-on busbars) avoid needing a spot welder.
+walto chose to build stations from **pre-made modules and boards**, not custom circuit boards. The architecture stays the same (section 5.1, architecture B). Each block becomes a ready-made board, wired together with connectors on a 3D-printed mounting plate. Only cables, connectors and a few through-hole joints need soldering.
 
-- **v0, bench (architecture A):** Raspberry Pi CM4 on the official IO board, TLV320ADC6140 evaluation board, 4 MEMS mic breakouts, GNSS breakout with PPS wired to ADC channel 8, EG25-G USB adapter, lab supply with power logging. Goal: real 4-channel recordings with PPS markers, power measurements, data for the Edge and Cloud threads.
-- **v1, field (architecture B):** custom carrier PCB with recorder MCU, supervisor, ADCs and power tree. Prototype mic pods. 6S1P LTO pack with commercial BMS and Victron MPPT. Goal: 2-week outdoor test, then a 4-week January test.
-- **v2, pilot kit:** 3 to 5 stations with production-intent pods, integrated power pack PCB and enclosures, for the field pilot in step 4.
+### 12.1 Pre-made version of each block
+
+| Block | Pre-made part *(example, verify availability)* | Note |
+|---|---|---|
+| Microphones | 4 to 6 digital PDM MEMS mic boards (Infineon IM69D130 "Shield2Go" class) in printed pods | Replaces the analog mic + ADC6140 chain, because no pre-made multichannel ADC board fits well. SNR about 69 dB instead of 73 dB (see 12.2). |
+| Recorder MCU | STM32H7 board without debugger power drain (for example a WeAct or Nucleo-H723 class board) | Its SAI interface reads up to 8 PDM mics on one shared clock, so channels stay sample-locked. |
+| Timing | u-blox MAX-M10S breakout (SparkFun class) with active antenna | PPS goes to a timer input on the recorder, which is clocked from the same source as the mic clock. That keeps sample-exact UTC timing without a spare audio channel. |
+| Storage | 2 microSD breakout boards, high-endurance cards | |
+| Supervisor + Bluetooth | nRF52840 board (Seeed XIAO or Adafruit Feather class) | |
+| RTC, power monitor, secure element, IMU, weather | I2C breakouts (RV-3028, INA228, ATECC608B, 9-axis IMU, SHT45, BMP390) | Qwiic/STEMMA cables, no soldering. |
+| Linux + Wi-Fi | Raspberry Pi Zero 2 W | Off except during uploads and setup. |
+| 4G | Quectel EC25-E mini-PCIe card on a USB adapter board | |
+| Power conversion and switching | Pre-made buck modules (Pololu class, -40 °C rated) and load-switch modules | |
+| Self-survey emitter | small horn tweeter + class-D amplifier board | |
+| Battery | Ready-made 12 V LTO packs (6S, about 40 Ah, with built-in BMS), or sodium-ion packs once available and tested | Two packs per station in winter, one in summer. |
+| Solar charging | Victron SmartSolar MPPT 75/10 | Rated to -30 °C, which is the edge of the requirement; it sits inside the insulated pack box. |
+| Enclosure, pods, frame | Bought IP67 box and connectors; pods, hub, plate and brackets 3D printed in ASA | |
+
+### 12.2 Where pre-made parts make the targets hard
+
+1. **Price (biggest effect).** Ready-made boards cost more than the same chips on one board, and the Victron charger costs more than its own circuit. The series estimate rises by about **€170 to 300 per station**, to about **€900 to 1,400 with LTO** or **€800 to 1,300 with sodium-ion**, against the €700 to 900 target *(est.)*. With pre-made parts **the price target is not reachable**. It is reachable with one custom carrier board (section 9.4), which can be designed and assembled by a service rather than by walto.
+2. **Winter battery.** Dev boards carry power LEDs, extra regulators and USB chips that are always on. Even with LEDs removed, the station is expected to draw about **1.1 to 1.3 W instead of 0.9 W** *(est.)*. That needs about 25 to 45 % more battery for 28 days at -30 °C, so roughly **three 9 kg packs in midwinter instead of two**, unless the measured power comes out lower.
+3. **Cold rating.** Many hobby boards use parts rated only to -20 °C or are not specified at all (the Pi Zero 2 W is rated -20 °C). Every board must pass the -30 °C outdoor test. Parts that fail are swapped for industrial modules, which cost more.
+4. **Localisation.** Timing and array geometry are unaffected. The digital mics are about 4 dB noisier, which shortens detection range somewhat in quiet winter forests *(est.)*. PDM mic signals over 0.5 to 1 m cables need careful shielding, which the prototype must verify. Neither is expected to break the accuracy targets in section 4.4.
+5. **Reliability and signed data.** Signing and hashing are unaffected (same secure element). Many connectors and jumper cables are a field-reliability risk from vibration, frost and moisture. Use locking connectors, secure cables in printed clamps, and conformal-coat the boards.
+
+**Recommendation:** build v0, v1 and the pilot kit from pre-made parts, as walto wants. This is the fastest way to real data and costs nothing in quality for testing. Revisit one custom carrier board, designed and assembled by a service, before series sales, because it is what brings the price and winter battery back to target.
+
+### 12.3 Prototype path (input for step 3)
+
+- **v0, bench:** STM32H7 board + 4 PDM mic boards + GNSS breakout, recording to SD with PPS timing; Pi Zero 2 W + EC25-E for upload; INA228 logging power. Goal: real 4-channel recordings, measured power, data for the Edge and Cloud threads.
+- **v1, field:** all blocks from table 12.1 on a printed plate in the IP67 box, printed mic pods, one ready-made LTO pack and Victron charger. Goal: 2-week outdoor test, then a 4-week January test with a sodium-ion pack beside an LTO pack.
+- **v2, pilot kit:** 4 stations for the field pilot in step 4, still from pre-made parts.
+
+**Cold testing without a chamber:** a chest freezer (about -18 to -25 °C) is enough for early tests of pods, icing and battery discharge. Real -30 °C tests can be done outdoors in central or northern Finland from December to February. A rented climate chamber is needed once, before sale, for a documented test *(verify availability and cost)*.
 
 ---
 
@@ -463,11 +540,11 @@ For walto:
 
 Answered 2026-11-02: version 1 must count and locate individual birds with multiple stations (section 4.4), power is solar plus battery (section 7), and stations include Bluetooth and Wi-Fi for phone setup (section 6.5).
 
-Answered 2026-11-02 (second round): a 17 kg pack is acceptable but smaller is preferred (section 7.3 now offers two 9 kg packs), Lapland polar night is for a later version (section 7.4), recording is continuous, and walto has a 3D printer (section 12 build plan).
+Answered 2026-11-02 (second round): a 17 kg pack is acceptable but smaller is preferred (section 7.3 now offers two 9 kg packs), Lapland polar night is for a later version (section 7.4), recording is continuous, and walto has a 3D printer. Stations are built from pre-made parts (section 12).
 
 Still open:
 
-1. Who lays out the PCBs: walto in KiCad, or a freelance PCB designer? (Step 2 decision.)
+1. Before series sales: accept a price above target with pre-made parts, or have a service design one custom carrier board (section 12.2)? Not needed until after the pilot.
 2. 4 or 6 mics per station: the prototype will compare both (section 4.4). Is a 1 to 2 mic "Lite" variant for hobbyists still wanted?
 
 For other threads:
