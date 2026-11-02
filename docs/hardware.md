@@ -1,6 +1,6 @@
 # Recording station hardware
 
-Status: draft for review (step 1 of the plan). Owner: walto (hardware build), Claude (design support and firmware). Last updated 2026-11-02.
+Status: draft for review (step 1 of the plan). Owner: walto (hardware build), Claude (design support and firmware). Last updated 2026-11-02 (rev. 2: individual-bird localisation across stations and phone setup are in scope for version 1).
 
 This document proposes the hardware for one recording station and for kits of 1 to N stations. It traces choices back to `docs/requirements.md` (`REQ-…`). Numbers marked *(est.)* are engineering estimates that the prototype must measure. Numbers marked *(verify)* come from datasheets or vendor pages and need checking against the exact part revision before the design is frozen.
 
@@ -13,8 +13,10 @@ This document proposes the hardware for one recording station and for kits of 1 
 - **Sampling and timing:** two TI TLV320ADC6140 ADCs share one TCXO clock (all channels sample-locked, REQ-T2). The GNSS PPS pulse is recorded as its own audio channel, so every file carries sample-exact UTC markers (REQ-T1) and stations line up to well under 1 ms (REQ-T2).
 - **Compute, two-tier:** a low-power real-time recorder MCU (STM32H7 class) records, FLAC-encodes and hashes audio around the clock. A Linux module (Raspberry Pi CM4) wakes only for bulk uploads and remote sessions. This is what makes 28 days of continuous recording in winter possible (REQ-O1). A Linux-only design is simpler but needs about 2.5 times the battery.
 - **Power:** lithium titanate (LTO) cells, which charge and discharge down to about -30 to -40 °C without heating. A 6S2P LTO pack (about 1.1 kWh) covers 28 days in midwinter with no solar at all. A 100 Wp panel mounted near vertical extends deployments from February to October indefinitely. A lighter LiFePO4 pack is offered for the warm season.
+- **Locating individual birds (version 1 scope):** stations are sample-synchronised by GNSS, and each array gives a direction to every call. Calls heard by several stations can be located on a map and simultaneous callers counted. This needs station positions to about 10 cm and array headings to about 1 to 2°. A shared survey GNSS receiver in each kit gives the positions, and an **acoustic self-survey** (stations chirp to each other) checks positions and headings. Section 4.4 covers this.
+- **Phone setup:** a Bluetooth Low Energy chip (which is also the supervisor MCU) lets a phone app set up and check a station. The Linux module adds Wi-Fi on demand for live listening and fast file download (section 6.5).
 - **Integrity:** a secure element on the station signs the hash-chained manifests (REQ-I1, REQ-I2).
-- **Rough cost** of one complete station at prototype quantities: **€1,500 to €2,600** *(est.)*, of which the power pack and storage are the largest swing items. Section 9 has the parts list.
+- **Rough cost** of one complete station at prototype quantities: **€1,450 to €2,650** *(est.)*, plus about €750 to €1,500 per kit for shared items such as the survey GNSS and calibrator, of which the power pack and storage are the largest swing items. Section 9 has the parts list.
 
 The biggest open issue is **how much audio goes over 4G** (section 6.4). Uploading the full 4-channel archive in winter costs more energy and data than the station can afford, so this design treats the on-station disk as the archive of record and uploads signed manifests plus a reduced stream. This needs agreement with the Requirements, Edge and Cloud threads.
 
@@ -29,7 +31,7 @@ flowchart LR
     M2["Mic pod 2"]
     M3["Mic pod 3"]
     M4["Mic pod 4 (raised)"]
-    ST["Self-test<br/>piezo emitter"]
+    ST["Self-test and<br/>self-survey emitter"]
   end
 
   subgraph HEAD["Station head (IP67, insulated)"]
@@ -41,8 +43,8 @@ flowchart LR
     REC["Recorder MCU<br/>STM32H7: TDM capture,<br/>FLAC, SHA-256"]
     SD[("Archive storage<br/>2 x microSD/SDXC, 1-2 TB")]
     SE["Secure element<br/>ATECC608B"]
-    SUP["Supervisor MCU<br/>STM32L4 + RTC<br/>watchdog, power switches"]
-    SOM["Linux module<br/>Raspberry Pi CM4<br/>(on demand)"]
+    SUP["Supervisor + BLE<br/>nRF52840 + RTC<br/>watchdog, power switches,<br/>phone setup"]
+    SOM["Linux module<br/>Raspberry Pi CM4 + Wi-Fi<br/>(on demand)"]
     LTE["4G modem<br/>Quectel EG25-G"]
     GNSS["GNSS u-blox M10<br/>PPS + NMEA"]
     IMU["IMU + magnetometer<br/>heading, tilt"]
@@ -85,7 +87,7 @@ Text version for quick reading:
         ^                          ^ PPS on ch 8           |  SHA-256, signed by [Secure element]
  [self-test emitter]          [GNSS M10] --PPS/UART-------+
                                                            | UART
- [Supervisor MCU + RTC] --load switches--> [CM4 Linux] --USB--> [4G modem] --> cloud
+ [Supervisor nRF52840 BLE + RTC] --load switches--> [CM4 Linux, Wi-Fi] --USB--> [4G modem] --> cloud
    | sensors: battery V/I, temps, RH, IMU                           ^
    +--------------- status messages via modem AT/MQTT ---------------+
  [Power pack: LTO 6S + BMS + MPPT] <-- [solar panel]
@@ -150,11 +152,40 @@ Channel plan: ch 1 to 6 for microphones (4 fitted by default), ch 7 spare (refer
 - **u-blox MAX-M10S** (or similar M10 module): low power (tens of mW), PPS output with tens of ns accuracy *(verify)*, -40 °C rated. An active patch antenna sits on top of the head.
 - **PPS recorded as audio:** the PPS pulse, attenuated, goes into ADC channel 8. Every second of every file has a marker on the exact sample where UTC seconds start. Software reads the UTC time of each marker from NMEA and can align files across stations to a sample (about 21 µs) with no reliance on operating-system timestamps. This meets REQ-T1 (under 10 ms to UTC) and REQ-T2 (under 1 ms between stations) by a large margin.
 - The recorder MCU also captures PPS on a timer input as a backup and logs GNSS lock state. Without lock the TCXO drifts at most about 7 ms per hour *(est.)*, and that period is flagged as REQ-T1 requires.
-- **Station position:** GNSS averaged over a deployment gives a few metres accuracy, which is fine for maps. Cross-station acoustic localisation needs station positions to roughly 0.5 m or better. Options are a dual-band module (u-blox F10 class) with long averaging, or measuring with a laser rangefinder at setup. This is an open question for the Requirements thread.
+- **Station position:** the M10 module's position (a few metres) is logged continuously to detect if a station is moved. It is not accurate enough for locating birds; section 4.4 covers survey-grade positions.
 
 ### 4.3 Orientation
 
-Direction of arrival is only useful in map coordinates if the array's heading is known. A 9-axis IMU (accelerometer + magnetometer) logs heading and tilt each hour, and also detects if the station is knocked over or moved (tamper alert). The deployment guide will also ask the user to point a marked arm north, as a cross-check against magnetic errors near the battery.
+Direction of arrival is only useful in map coordinates if the array's heading is known. The magnetometer alone is only good to a few degrees near a steel mast and the battery, so the acoustic self-survey in section 4.4 is the main heading reference and the magnetometer detects later changes. A 9-axis IMU (accelerometer + magnetometer) logs heading and tilt each hour, and also detects if the station is knocked over or moved (tamper alert). The deployment guide will also ask the user to point a marked arm north, as a cross-check against magnetic errors near the battery.
+
+### 4.4 Locating and counting individual birds across stations
+
+Version 1 must locate individual birds with several stations (requirements Level 3, REQ-T2). The hardware supports two complementary methods, and the analysis can combine them:
+
+- **Time differences between stations:** stations sample-locked to UTC through PPS (about 21 µs, about 7 mm of sound path) give the time differences of one call reaching 3 or more stations, which fixes its position.
+- **Directions from each array:** each 4-mic array gives a bearing (and elevation) to the call. Two or more bearings crossing give a position, and bearings also separate birds calling at the same time from different directions.
+
+What limits accuracy is not timing but **knowing where each station is and which way it points**. A 30 cm position error is about 0.9 ms of sound travel, and a 2° heading error moves a bird 50 m away sideways by about 1.7 m. Targets proposed for the Requirements doc:
+
+| Quantity | Target | How |
+|---|---|---|
+| Station array centre position | 10 cm horizontal, 20 cm height | survey GNSS (below) |
+| Array heading | 1 to 2° | acoustic self-survey, magnetometer for change detection |
+| Inter-station timing | under 50 µs | PPS on ADC channel 8 (already in design) |
+| Speed of sound | from measured air temperature | SHT45 at each station |
+
+**Survey GNSS, one per kit:** a dual-band RTK receiver (u-blox ZED-F9P class with a survey antenna) that clamps onto each station's mast at setup and logs raw observations for about 30 to 60 minutes. Positions are post-processed against the National Land Survey of Finland's FinnRef reference stations (open data *(verify current access terms)*), or computed live with an RTK correction service, giving centimetre-level positions. One shared unit is cheaper than a dual-band receiver in every station and works the same way.
+
+**Acoustic self-survey:** the emitter in each array is a small horn tweeter loud enough (about 100 dB SPL at 1 m *(est.)*) to be heard at neighbouring stations 50 to 150 m away. After setup, and then daily, each station plays a coded chirp in turn at a known GNSS time. The others record it, which gives:
+- the time of flight between every pair of stations, so distances to a few cm, which cross-check the GNSS survey;
+- the bearing of each neighbour at each array, so every array's heading to well under a degree *(est.)*;
+- a check that every microphone and the timing chain work end to end (REQ-A4, REQ-T2).
+
+The chirp is short, at a fixed time, and logged so analysis can remove it. Its sound level and timing must be checked against disturbance rules for sensitive sites (Requirements thread).
+
+**Station spacing:** a station hears small songbirds out to roughly 50 to 150 m depending on species, wind and terrain *(est.)*. For localisation each bird should be heard by at least 2 arrays, and preferably 3 or more, so a localisation layout is a grid or triangle of **at least 3 to 4 stations about 50 to 100 m apart**. Larger species and open landscapes allow wider spacing. The deployment guide and phone app will suggest a layout from the area to cover.
+
+**Four or six mics:** four mics are the minimum for 3D bearings without ambiguity. Six give better separation of simultaneous callers and tolerate one iced or failed pod. The ADC board supports six without changes, so the prototype will compare both before the product is fixed.
 
 ---
 
@@ -177,8 +208,8 @@ Direction of arrival is only useful in map coordinates if the array's heading is
 ### 5.2 Parts
 
 - **Recorder MCU:** STM32H7 class with SAI (TDM input), SDMMC, and ideally a hardware hash unit (for example STM32H733/H735, which include crypto/hash *(verify)*). It records the TDM stream, writes FLAC files (one file per 10 to 60 minutes), computes SHA-256 when each file closes (REQ-I1) and has the secure element sign the chained manifest (REQ-I2). FLAC encoding of 4 to 8 channels at 48 kHz in real time on an H7 must be confirmed on the bench.
-- **Linux module:** Raspberry Pi CM4 (2 GB RAM, 8 GB eMMC, no Wi-Fi), rated -20 to +85 °C. It runs the uploader, the VPN for remote access, and any heavier jobs. If cold tests show problems, swap for an industrial -40 °C module (for example i.MX8M Mini SoMs from Toradex or Variscite) on the same carrier footprint concept.
-- **Supervisor MCU:** STM32L4 class with an external low-power RTC (RV-3028, -40 °C). It is always on at a few mW. It runs the hardware watchdog, power-cycles the recorder, Linux module and modem, reads battery voltage/current/energy (TI INA228), temperatures (board, battery, pods, ambient) and humidity in the box, controls heaters, and sends the hourly status message (REQ-O3) through the modem's built-in TCP/MQTT stack without waking Linux.
+- **Linux module:** Raspberry Pi CM4 (2 GB RAM, 8 GB eMMC, with Wi-Fi/Bluetooth for local access, section 6.5), rated -20 to +85 °C. It runs the uploader, the VPN for remote access, and any heavier jobs. If cold tests show problems, swap for an industrial -40 °C module (for example i.MX8M Mini SoMs from Toradex or Variscite) on the same carrier footprint concept.
+- **Supervisor MCU with Bluetooth:** Nordic nRF52840 module (BLE 5, -40 to +85 °C, microamp sleep) with an external low-power RTC (RV-3028, -40 °C). It is always on at a few mW and also handles phone setup (section 6.5). It runs the hardware watchdog, power-cycles the recorder, Linux module and modem, reads battery voltage/current/energy (TI INA228), temperatures (board, battery, pods, ambient) and humidity in the box, controls heaters, and sends the hourly status message (REQ-O3) through the modem's built-in TCP/MQTT stack without waking Linux.
 - **Secure element:** Microchip ATECC608B (or NXP SE050). Holds the device private key used to sign manifests (REQ-I2) and to authenticate to the cloud.
 
 ### 5.3 Storage
@@ -213,6 +244,9 @@ Proposal: **two industrial or high-endurance microSD/SDXC slots, 1 TB each**, wr
 
 ### 6.4 Upload budget (open issue)
 
+Locating birds across stations needs short multichannel clips from several stations around the same call. The "clips on request" path below covers this: the cloud asks every station in the layout for the same time window.
+
+
 Uploading costs roughly 0.4 to 0.6 Wh per GB at good signal *(est.: modem about 2 W while sending at about 10 Mbps)*, and much more at weak signal. The full 4-channel archive is about 35 GB per day, which means about 3.2 Mbps sustained, about 16 Wh per day extra (doubling the winter battery), and about 1 TB of mobile data per station per month. In many remote Finnish sites the uplink cannot sustain that at all.
 
 Proposed upload policy, configurable per project:
@@ -223,6 +257,12 @@ Proposed upload policy, configurable per project:
 4. **At service visit:** the SD cards are the archive of record and are ingested and verified against the signed manifests. The station only deletes files after the cloud confirms their hashes (REQ-I3), so nothing is lost by uploading less.
 
 This keeps REQ-I1 to REQ-I4 intact, but it changes what "upload" means in REQ-I3 and REQ-O2. The Requirements, Edge and Cloud threads should agree on it.
+
+### 6.5 Phone setup over Bluetooth and Wi-Fi
+
+- **Bluetooth Low Energy (always available):** the supervisor nRF52840 advertises for about 10 minutes after power-up or after the user taps a magnet on a marked spot on the box (a reed switch, so there is no hole or button to leak). The phone app can then pair, set station name and project, show GNSS lock, battery, live microphone levels and the self-test result, start the survey and self-survey, and set the schedule and gain. Pairing uses a per-station code on the QR label, and every configuration change is logged with time and user (REQ-O4).
+- **Wi-Fi (on demand):** from the app the user can wake the Linux module, which opens a local Wi-Fi access point for live listening, viewing recent recordings and fast download of clips. It turns off again when the session ends.
+- Polycarbonate is radio-transparent, so the Bluetooth and Wi-Fi antennas stay inside the box. Power cost is negligible because both radios are only on during setup visits.
 
 ---
 
@@ -316,16 +356,16 @@ Prices in euros, excluding VAT, at 1 to 5 units *(est.)*. Small-series prices (5
 | 3 | Audio ADC | TI TLV320ADC6140 | 2 | €10 to 16 |
 | 4 | TCXO 24.576 MHz, ±2 ppm, -40 °C | various | 1 | €3 to 6 |
 | 5 | Recorder MCU | STM32H733/H735 | 1 | €10 to 15 |
-| 6 | Supervisor MCU + RTC + power monitor | STM32L4, RV-3028, INA228 | 1 set | €12 to 18 |
+| 6 | Supervisor MCU with BLE + RTC + power monitor + reed switch | nRF52840 module, RV-3028, INA228 | 1 set | €18 to 28 |
 | 7 | Secure element | Microchip ATECC608B | 1 | €1 to 2 |
 | 8 | Archive storage, 1 TB high-endurance/industrial | microSDXC | 2 | €150 to 400 |
-| 9 | Linux module | Raspberry Pi CM4 2 GB / 8 GB eMMC, no wireless | 1 | €45 to 65 |
+| 9 | Linux module with Wi-Fi/BT, internal antenna | Raspberry Pi CM4 2 GB / 8 GB eMMC, wireless | 1 | €55 to 80 |
 | 10 | 4G modem | Quectel EG25-G | 1 | €40 to 60 |
 | 11 | Industrial SIM / eSIM | operator | 1 | (opex) |
 | 12 | GNSS module + active antenna | u-blox MAX-M10S | 1 | €25 to 40 |
 | 13 | IMU + magnetometer | ST or Bosch 9-axis | 1 | €6 to 10 |
 | 14 | Weather sensors + radiation shield | SHT45, BMP390 | 1 set | €20 to 30 |
-| 15 | Self-test piezo + driver | various | 1 | €5 to 10 |
+| 15 | Self-test and self-survey emitter (horn tweeter) + amplifier | various | 1 | €15 to 30 |
 | 16 | Carrier PCB, fab and assembly | custom, 4 to 6 layers | 1 | €150 to 300 |
 | 17 | Power tree components | bucks, eFuse, TVS, ideal diode | 1 set | €20 to 35 |
 | 18 | Enclosure, foam, vent, desiccant | Fibox/Spelsberg IP67 | 1 | €50 to 80 |
@@ -334,7 +374,7 @@ Prices in euros, excluding VAT, at 1 to 5 units *(est.)*. Small-series prices (5
 | 21 | LTE antennas (2) + surge arrester | outdoor omni | 1 set | €40 to 80 |
 | 22 | Mounting kit and cable lock | strap, pole clamp | 1 | €40 to 70 |
 | 23 | Fasteners, coating, misc. | | | €20 to 30 |
-| | **Station head total** | | | **about €820 to 1,580** |
+| | **Station head total** | | | **about €850 to 1,630** |
 
 ### 9.2 Power pack and solar
 
@@ -355,9 +395,10 @@ A 6S1P pack saves about €150 to 270 and 8 kg. A warm-season LiFePO4 pack (12.8
 | Item | Est. cost |
 |---|---|
 | Acoustic calibrator (94 dB, 1 kHz, class 1 or 2) with ½-inch pod adapter (REQ-A3) | €300 to 700 |
+| Survey GNSS: dual-band RTK receiver (u-blox ZED-F9P class), survey antenna, mast clamp, battery (section 4.4) | €300 to 500 |
 | Transport cases, spare pods, spare windscreens, tools | €150 to 300 |
 
-**One complete station (head + 6S2P pack + panel): about €1,420 to 2,610 at prototype quantities** *(est.)*. Architecture A saves the recorder MCU (about €15) but needs an SSD and a 6S4P pack (about €300 to 550 more and about 15 kg heavier than 6S2P).
+**One complete station (head + 6S2P pack + panel): about €1,450 to 2,660 at prototype quantities** *(est.)*. Shared kit items add about €750 to 1,500 per kit, so a 4-station localisation kit comes to roughly €6,600 to 12,100 at prototype prices. Architecture A saves the recorder MCU (about €15) but needs an SSD and a 6S4P pack (about €300 to 550 more and about 15 kg heavier than 6S2P).
 
 ---
 
@@ -373,6 +414,8 @@ A 6S1P pack saves about €150 to 270 and 8 kg. A warm-season LiFePO4 pack (12.8
 | Battery | LTO | LiFePO4, Li-SOCl2 | charges and discharges at -30 °C without heating |
 | Layout | separate power pack at ground | all in one box | heavy pack on the ground, light head on the mast, pack sizes swappable |
 | Kit scaling | identical autonomous stations | hub with mesh radio | each station works alone, so 1 to 20+ stations is just a count |
+| Station positions | shared survey GNSS + acoustic self-survey | dual-band GNSS in every station, tape and compass | centimetre positions and sub-degree headings at lowest cost per station |
+| Phone setup | BLE on the supervisor, Wi-Fi from Linux on demand | Wi-Fi only | BLE is always available at microwatts; Wi-Fi only when its bandwidth is needed |
 
 ---
 
@@ -402,15 +445,19 @@ A home freezer only reaches about -18 to -24 °C, so the -30 °C tests need eith
 
 For walto:
 
+Answered 2026-11-02: version 1 must count and locate individual birds with multiple stations (section 4.4), power is solar plus battery (section 7), and stations include Bluetooth and Wi-Fi for phone setup (section 6.5).
+
+Still open:
+
 1. Is a separate ground-level power pack (about 17 kg for the winter pack) acceptable, or is there a weight limit per station that a user should carry?
 2. Should the kit work in Lapland during the polar night (December to mid-January), or is southern and central Finland enough for winter?
 3. What tools do you have for building: PCB design (KiCad?), reflow or hot-air, 3D printer, any access to a cold chamber?
-4. Is a 4-mic array per station the right base, with a 1 to 2 mic "Lite" variant for hobbyists left to the Product thread?
+4. 4 or 6 mics per station: the prototype will compare both (section 4.4). Is a 1 to 2 mic "Lite" variant for hobbyists still wanted?
 
 For other threads:
 
 - **Requirements / Edge / Cloud:** agree the upload policy in section 6.4 (on-station archive of record vs full upload), since it drives battery size and data cost.
-- **Requirements:** how accurately station positions must be known for cross-station localisation (section 4.2).
+- **Requirements:** adopt the position, heading and timing targets in section 4.4, and check whether the self-survey chirp is acceptable at sensitive sites.
 - **Product:** CE/RED and EMC testing plan; whether to sell LiFePO4 summer packs alongside LTO.
 
 ## Sources
