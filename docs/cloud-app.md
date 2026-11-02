@@ -230,12 +230,40 @@ sound. Station spacing must be within hearing distance of the target species
 (typically 50–200 m). Localization runs only on detection windows, so compute
 stays small.
 
-### 5.3 Phasing
+### 5.3 Counting individuals (v1 scope)
 
-Presence, activity and migration counts are in the first prototype. DOA comes
-next. Multi-station TDOA is a later feature but **the hardware and data format
-must support it from day one** (sync timestamps, geometry metadata), otherwise
-early data can never be localized.
+**Decision (walto, 2026-11-02): version 1 must count and locate individual
+birds using multiple stations.** So TDOA localization is a v1 feature, not a
+later one. How the counting works:
+
+1. **Event matching:** a detection on one station is matched to detections of
+   the same species on neighbouring stations within the maximum travel time
+   (distance / speed of sound + timing error).
+2. **Localize:** TDOA across stations (and DOA within each array, which helps
+   when only 2 stations hear a call) gives a position and an error ellipse.
+   Positions with too-large ellipses are kept but marked "not localized".
+3. **Cluster into individuals:** positions of the same species are clustered in
+   space and time (singing posts, territories). Calls that overlap in time from
+   clearly separate positions are proof of separate birds.
+4. **Report counts with uncertainty:** minimum number of individuals (from
+   simultaneous separated calls) and estimated number (from clusters), with a
+   confidence range. A reviewer can merge or split clusters on the map.
+5. **Validate:** the field pilot compares counts with a human territory mapping
+   survey and with test sounds played from known positions (also checks the
+   timing chain end to end).
+
+**Effect on uploads:** localization needs all channels from every station that
+heard the call. With the Reference default, localization runs in two ways:
+- *Near real time, selective:* when a detection is found on the reference
+  channel, the cloud automatically requests the matching all-channel window from
+  that station and its neighbours (a few seconds of audio each, small enough
+  even in winter).
+- *Complete:* after SD ingest at the service visit (§3.3), the whole deployment
+  is localized. Reports used for counts are based on this complete run.
+
+**Station layout:** the app includes a planning tool on the map that suggests
+station spacing for the target species group and shows the area where
+localization is expected to work (at least 3 stations in hearing range).
 
 ## 6. Desktop / offline processing
 
@@ -262,6 +290,13 @@ For customers who cannot or will not use the cloud, or who retrieve SD cards.
 Organization ➝ Projects ➝ Sites ➝ Deployments (a station at a place for a
 period) ➝ Recordings ➝ Detections. A station can move between deployments;
 history is kept.
+
+**Phone setup flow:** at the site, the installer connects to the station over
+Bluetooth from the phone (web app or small companion app), which registers the
+station to the deployment, records its GPS position and mic array heading,
+takes photos, runs a test (plays a sound, checks all channels and time sync)
+and attaches the landowner permission (REQ-P4). Accurate positions and heading
+are essential for localization.
 
 ### 7.2 Device status
 
@@ -399,10 +434,10 @@ range that covers storage + SIM + support is realistic, and long-retention or
 
 | Phase | Cloud & app scope |
 |---|---|
-| **Prototype (step 3)** | Ingest with hashes and manifests, BirdNET + Perch batch runs with run versioning, Finnish species list, simple review UI, CSV + Raven export, desktop CLI for SD import with manifest verification |
-| **Field pilot (step 4)** | Dashboard with device status and alerts, remote config, maps, stratified review with precision estimates, Laji.fi export, PDF report, speech muting, desktop app |
-| **Product v1** | Multi-tenant orgs and roles, DOA bearings, on-demand clip requests, DPA/legal package, billing hooks |
-| **v2** | Multi-station TDOA localization and territory maps, custom Finnish classifier, occupancy outputs |
+| **Prototype (step 3)** | Ingest with hashes and manifests, BirdNET + Perch batch runs with run versioning, Finnish species list, simple review UI, CSV + Raven export, desktop CLI for SD import with manifest verification, multi-station TDOA tested on recordings of sounds played from known positions |
+| **Field pilot (step 4)** | Dashboard with device status and alerts, remote config, maps, phone setup flow, on-demand clip requests, localization and individual counting with review on the map, stratified review with precision estimates, Laji.fi export, PDF report, speech muting, desktop app |
+| **Product v1** | Multi-tenant orgs and roles, station layout planner, territory maps, DPA/legal package, billing |
+| **v2** | Custom Finnish classifier, occupancy outputs, mail-in SD service |
 
 ## 14. Interfaces to sibling documents
 
@@ -411,21 +446,23 @@ range that covers storage + SIM + support is realistic, and long-retention or
 | Hardware | Synchronous multi-channel ADC; GPS with PPS; secure element for device key; mic geometry spec; power budget for 4G uplink in winter |
 | Edge software | Chunk + signed manifest format; resumable uploader; MQTT topics for telemetry/config/commands; on-demand clip upload; OTA |
 | Requirements & data quality | Target precision/recall per species group; which outputs must be "evidence grade"; retention requirements |
-| Product & business | Model licensing decision; subscription pricing; first target customer segment (drives report template) |
+| Product & business | Model licensing outcome; cloud subscription pricing for a sold kit; first report template for consultants and researchers |
 
-## 15. Open questions
+## 15. Decisions and open questions
 
-1. **Model licensing:** OK to approach the BirdNET team and Univ. Helsinki about
-   commercial licensing or partnership, or should we aim for our own
-   Perch-based classifier from the start?
-2. **Upload mode default:** is Reference mode (1 channel live, rest from SD)
-   acceptable given the expected winter power budget?
-3. **First customer segment:** are wind-power / YVA consultants the first
-   target? That decides the first report template.
-4. **Hosting:** preference between a Finnish provider (UpCloud), lowest cost
-   (Hetzner) or AWS?
-5. **Retention:** how long do customers need raw audio kept (legal cases may
+Decided by walto on 2026-11-02:
+- V1 counts and locates individual birds with multiple stations (§5.3).
+- Consultants and researchers are the first customers.
+- The kit is sold, not rented. Cloud use is still an ongoing service (§12).
+- Contacting the BirdNET team and the Finnish research group about licensing
+  is approved; drafts are prepared for walto to review before sending.
+- Stations use solar plus battery, and have Bluetooth/Wi-Fi for phone setup.
+- A possible pilot partner: Luontopalvelut Flava (luontopalvelutflava.fi).
+
+Still open:
+1. **Hosting:** Finnish provider (UpCloud), lowest cost (Hetzner) or AWS?
+2. **Retention:** how long do customers need raw audio kept (legal cases may
    need years)?
-6. **Desktop OS:** is Windows the main platform for customers?
-7. **Localization:** is multi-station localization a must-have for v1 sales, or
-   is per-station presence/activity enough to start?
+3. **Desktop OS:** is Windows the main platform for customers?
+4. **Pricing of the cloud service** for a sold kit: included for a first
+   period, then a yearly subscription? (business doc)
