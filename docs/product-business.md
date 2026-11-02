@@ -19,7 +19,7 @@ working assumptions to be replaced once the hardware BOM and cloud costs are kno
 | Power | **Solar + battery** | Higher BOM and price; solar panel and mount part of the kit |
 | Phone setup | Stations **may include Bluetooth/Wi-Fi** | Setup flow uses phone pairing; adds radio tests to CE |
 | Pilot | **Luontopalvelut Flava Oy** (luontopalvelutflava.fi) as candidate pilot partner | See section 9 |
-| Company | walto has a **toiminimi** | Recommend forming an Oy before the first sale (section 5a) |
+| Company | **Toiminimi; no Oy** (walto, 2026-11-02) | Liability handled by insurance and contract terms (section 5a) |
 | Legal uses | **All**: wind-power YVA, Natura assessments and permit monitoring | Report templates for all three; YVA first in practice because of volume (section 9) |
 | Recording | **Continuous** | Drives storage, power and data cost |
 | Data ownership | **The customer owns the data** | We act only as processor; full export and delete; desktop-only option (section 4) |
@@ -152,13 +152,21 @@ pilot).
 
 ### 5a. Company form and liability
 
-walto runs a **toiminimi** (sole trader). That is fine for development and pilots, but as the
-manufacturer selling CE-marked electronics, a sole trader is **personally liable without limit**
-under the Product Liability Act (tuotevastuulaki) and for warranty claims. A battery fire or a
-failed regulatory survey could reach personal assets. Recommendation: **form an Oy (osakeyhtiö,
-minimum share capital €0) before the first sale**, take **product liability and professional
-liability insurance**, and register the Oy (not the toiminimi) as manufacturer for CE, WEEE and
-batteries so registrations do not have to be moved later.
+walto sells through a **toiminimi** (sole trader) and will not form an Oy (decision 2026-11-02).
+A sole trader is **personally liable without limit** as manufacturer of CE-marked electronics,
+under the Product Liability Act (tuotevastuulaki) and for contract and warranty claims. Since
+there is no company to absorb that risk, these become requirements before the first sale:
+
+- **Product liability insurance** (tuotevastuuvakuutus) covering battery fire and property damage.
+- **Professional/consultancy liability insurance** (vastuuvakuutus) covering faulty data or
+  reports, since buyers use results in permitting.
+- **B2B sales terms** (e.g. based on the Finnish standard terms for equipment deliveries) that
+  limit contract liability to the price paid and exclude indirect losses such as a delayed permit.
+  Product liability for personal injury cannot be excluded by contract; insurance covers that.
+- **Data and reports framed as decision support**: the method text says detections are verified
+  by the customer's expert, who signs the report.
+- Business and personal finances kept separate. All CE, WEEE and battery registrations go under
+  the toiminimi's Y-tunnus (business ID).
 
 **Practical path:** design with pre-certified modules, do an EMC/radio **pre-compliance scan** on
 the prototype (step 3), then full testing on the pilot hardware (step 4). Paid pilots before CE
@@ -314,9 +322,7 @@ hand, sensible defaults for Finnish seasons (spring migration, breeding, autumn,
 
 ## 10. Open questions for walto
 
-Answered on 2026-11-02: see section 0. Still open:
-
-1. Will you form an **Oy** before the first sale (section 5a)?
+All questions answered on 2026-11-02 (section 0). Next open items move to step 2 (architecture).
 
 ---
 
