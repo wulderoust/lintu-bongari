@@ -73,6 +73,9 @@ up to ~15 kHz):
 | 1 channel | 8.3 GB/day | ~5 GB/day | ~140 GB |
 | 4 channels | 33 GB/day | ~20 GB/day | ~560 GB |
 
+(The hardware doc, §6.4, estimates ~35 GB/day for 4 channels; the exact
+figure depends on bit depth and FLAC ratio on real field audio, to be measured.)
+
 20 GB/day is ~1.9 Mbit/s of sustained uplink. Finnish unlimited 4G plans can
 carry that, but the **modem's power draw in winter** is likely the real limit
 (hardware/edge decision). So the cloud supports three **upload modes**, chosen
@@ -81,14 +84,15 @@ per deployment in remote config:
 | Mode | What goes over 4G | What stays on SD | Use when |
 |---|---|---|---|
 | **Full** | All channels, FLAC | Copy of everything | Good power, need near-real-time localization |
+| **Reference + opportunistic** | 1 reference channel; other channels when battery/solar and coverage allow (hardware doc §6.4) | All channels | Summer, good sites |
 | **Reference** *(recommended default)* | 1 reference channel, FLAC | All channels | Most deployments: ID in near-real-time, localization after retrieval or on request |
 | **Harvest** | Telemetry only | Everything | Very low power / poor coverage |
 
 In Reference mode the cloud can **request specific time windows of the other
 channels** (e.g. "send all channels for detections of Capercaillie on
 2026-04-12") so localization of interesting events still works remotely.
-After retrieval, the SD card is uploaded (or imported in the desktop app) and
-reconciled against what arrived over 4G, by hash.
+In every mode the **SD cards are the archive of record**; see §3.3 for how
+they are ingested at service visits.
 
 Recording schedules (e.g. dawn chorus + night migration only) reduce all of
 the above proportionally and are part of remote config.
@@ -105,7 +109,36 @@ the above proportionally and are part of remote config.
 - **Backlog:** the station uploads newest telemetry first, then audio oldest
   first; the dashboard shows the backlog size.
 
-### 3.3 Chain of custody (evidence grade)
+### 3.3 SD archive ingest at service visits
+
+Manifests and status go up continuously over 4G, so the cloud always knows
+which chunks exist and their hashes, even for audio that has not been uploaded.
+At a service visit (card swap or station retrieval):
+
+1. **Card swap:** the technician swaps in a fresh, pre-registered card. The
+   dashboard shows the swap from the station's telemetry, and the deployment
+   record notes card serials and swap time.
+2. **Upload from the office:** the card is read with the desktop app (or a
+   small ingest tool) on a computer with a fixed connection. It uploads only the
+   chunks the cloud does not yet have, resumable over several days if needed
+   (~0.5–1 TB per 4-week, 4-channel deployment). Customers who do not use the
+   cloud import the card locally instead (§6), with the same checks.
+3. **Verification against manifests:** each chunk's SHA-256 is recomputed and
+   compared with the signed, hash-chained manifest the station already sent. The
+   ingest report lists: chunks verified, chunks already present from 4G (hashes
+   must match), missing chunks, and any mismatches. A mismatch or gap is flagged
+   on the deployment and in its reports, never silently filled.
+4. **Merge:** verified multi-channel chunks replace the reference-only coverage
+   for that period, and queued analyses (DOA, localization, best-channel ID)
+   run automatically on them.
+5. **Card release:** only when every chunk on the card is verified in
+   write-once storage does the app mark the card safe to wipe and reuse
+   (REQ-I3). The release is written to the audit log.
+
+Optional later: a **mail-in service** where customers post cards to us and we
+ingest them, for customers with slow office connections.
+
+### 3.4 Chain of custody (evidence grade)
 
 1. Station computes SHA-256 of every chunk at write time and writes a
    **manifest** (chunk hash, start time, time-sync quality, GPS position,
@@ -366,7 +399,7 @@ range that covers storage + SIM + support is realistic, and long-retention or
 
 | Phase | Cloud & app scope |
 |---|---|
-| **Prototype (step 3)** | Ingest with hashes and manifests, BirdNET + Perch batch runs with run versioning, Finnish species list, simple review UI, CSV + Raven export, desktop CLI for SD import |
+| **Prototype (step 3)** | Ingest with hashes and manifests, BirdNET + Perch batch runs with run versioning, Finnish species list, simple review UI, CSV + Raven export, desktop CLI for SD import with manifest verification |
 | **Field pilot (step 4)** | Dashboard with device status and alerts, remote config, maps, stratified review with precision estimates, Laji.fi export, PDF report, speech muting, desktop app |
 | **Product v1** | Multi-tenant orgs and roles, DOA bearings, on-demand clip requests, DPA/legal package, billing hooks |
 | **v2** | Multi-station TDOA localization and territory maps, custom Finnish classifier, occupancy outputs |
