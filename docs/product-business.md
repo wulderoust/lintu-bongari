@@ -216,7 +216,7 @@ with gloves on, in snow, without a laptop.**
 **At the site**
 3. Strap or screw the station to a tree/pole (included strap and bracket).
 4. Connect the battery and press one button. The LED shows: searching GPS/4G → OK (green).
-5. Open the phone app; it pairs with the station over Bluetooth (QR code on the lid identifies it), which records location, a photo of the site and
+5. Open the phone app; it pairs with the station over Bluetooth (QR code on the lid identifies it) and records location, a photo of the site and
    a note (or does it automatically from the station's GPS).
 6. The app confirms "Recording, connected, battery estimate 26 days". Done.
 
