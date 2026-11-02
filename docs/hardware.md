@@ -1,6 +1,6 @@
 # Recording station hardware
 
-Status: draft for review (step 1 of the plan). Owner: walto (hardware build), Claude (design support and firmware). Last updated 2026-11-02 (rev. 2: individual-bird localisation across stations and phone setup are in scope for version 1).
+Status: draft for review (step 1 of the plan). Owner: walto (hardware build), Claude (design support and firmware). Last updated 2026-11-02 (rev. 3: individual-bird localisation and phone setup in v1 scope; winter battery split into two packs; v1 winter scope is southern and central Finland; build plan for a 3D printer plus assembly services).
 
 This document proposes the hardware for one recording station and for kits of 1 to N stations. It traces choices back to `docs/requirements.md` (`REQ-…`). Numbers marked *(est.)* are engineering estimates that the prototype must measure. Numbers marked *(verify)* come from datasheets or vendor pages and need checking against the exact part revision before the design is frozen.
 
@@ -12,7 +12,7 @@ This document proposes the hardware for one recording station and for kits of 1 
 - **Microphones:** 4 analog MEMS microphones in a tetrahedral array (about 40 cm across), each in a heated, downward-facing, membrane-protected pod. The ADC side has 8 channels, so a 6-mic variant fits the same board.
 - **Sampling and timing:** two TI TLV320ADC6140 ADCs share one TCXO clock (all channels sample-locked, REQ-T2). The GNSS PPS pulse is recorded as its own audio channel, so every file carries sample-exact UTC markers (REQ-T1) and stations line up to well under 1 ms (REQ-T2).
 - **Compute, two-tier:** a low-power real-time recorder MCU (STM32H7 class) records, FLAC-encodes and hashes audio around the clock. A Linux module (Raspberry Pi CM4) wakes only for bulk uploads and remote sessions. This is what makes 28 days of continuous recording in winter possible (REQ-O1). A Linux-only design is simpler but needs about 2.5 times the battery.
-- **Power:** lithium titanate (LTO) cells, which charge and discharge down to about -30 to -40 °C without heating. A 6S2P LTO pack (about 1.1 kWh) covers 28 days in midwinter with no solar at all. A 100 Wp panel mounted near vertical extends deployments from February to October indefinitely. A lighter LiFePO4 pack is offered for the warm season.
+- **Power:** lithium titanate (LTO) cells, which charge and discharge down to about -30 to -40 °C without heating. A 6S2P LTO pack (about 1.1 kWh), delivered as two identical 9 kg packs, covers 28 days in midwinter in southern and central Finland with no solar at all. A 100 Wp panel mounted near vertical extends deployments from February to October indefinitely. A lighter LiFePO4 pack is offered for the warm season.
 - **Locating individual birds (version 1 scope):** stations are sample-synchronised by GNSS, and each array gives a direction to every call. Calls heard by several stations can be located on a map and simultaneous callers counted. This needs station positions to about 10 cm and array headings to about 1 to 2°. A shared survey GNSS receiver in each kit gives the positions, and an **acoustic self-survey** (stations chirp to each other) checks positions and headings. Section 4.4 covers this.
 - **Phone setup:** a Bluetooth Low Energy chip (which is also the supervisor MCU) lets a phone app set up and check a station. The Linux module adds Wi-Fi on demand for live listening and fast file download (section 6.5).
 - **Integrity:** a secure element on the station signs the hash-chained manifests (REQ-I1, REQ-I2).
@@ -313,6 +313,13 @@ Usable winter energy = nominal × 0.75 (cold) × 0.9 (depth of discharge and age
 
 So **architecture B with a 6S2P pack meets REQ-O1 (28 days, -30 °C) with no solar at all**, with about 20 % margin. The supervisor reports remaining runtime, and if the battery runs low it closes files cleanly, uploads a final manifest and stops with an alarm rather than corrupting data (REQ-O1: no silent loss).
 
+**Making it lighter: two 9 kg packs instead of one 17 kg pack.** The station has two power inputs combined through ideal diodes, so the winter energy can come from **two identical 6S1P packs** (about 9 kg each) instead of one 6S2P pack. Each pack is a comfortable single carry, the same pack is used alone from February to October, and a kit needs only one pack design. The station draws from both and reports each pack's charge separately. The trade-off is one extra cable and connector per station and slightly more cost (about €60 to 100 for the second BMS and box).
+
+Other ways to get below 17 kg, which the prototype will measure:
+- **Lower upload volume.** Uploading the reference channel compressed (about 1 GB/day) instead of lossless (about 8 GB/day) saves about 3 Wh/day, roughly 13 % of the winter budget *(est.)*. Whether lossless upload is worth it is being compared in the Edge and Cloud docs; the hardware supports both.
+- **Counting some December sun in southern Finland.** Even 10 Wh/day average from the panel would cut the battery needed for 28 days by about 40 %. This is not counted yet, because sunless weeks are common; field data from the pilot will show if a single 6S1P pack is enough in the south.
+- **Lower measured power.** Every 0.1 W saved is about 67 Wh, or about 1 to 1.5 kg of LTO cells, over 28 days.
+
 ### 7.4 Solar
 
 Rough yields for one 100 Wp panel facing south at about 70 to 90° tilt *(est.; verify per site with [PVGIS](https://re.jrc.ec.europa.eu/pvg_tools/en/), which this environment could not reach)*:
@@ -322,6 +329,8 @@ Rough yields for one 100 Wp panel facing south at about 70 to 90° tilt *(est.; 
 - **April to September:** far more than the station needs.
 
 Design rule: **size the battery as if there is no sun from November to January.** Treat solar as a bonus then, and as the main source the rest of the year, when a 6S1P or LiFePO4 pack plus a 50 to 100 Wp panel runs indefinitely. A near-vertical panel sheds snow and catches the low winter sun.
+
+**Version 1 winter scope is southern and central Finland.** Lapland during the polar night (no usable sun from about December to mid-January) is planned for a later version. It would need either three 6S1P packs per station or a higher-energy cold-rated option, and it is left out of the v1 sizing.
 
 ### 7.5 Charger, BMS and power tree
 
@@ -388,7 +397,7 @@ Prices in euros, excluding VAT, at 1 to 5 units *(est.)*. Small-series prices (5
 | 29 | Solar panel 100 Wp mono + near-vertical bracket + cable | | 1 | €110 to 180 |
 | | **Power pack (6S2P) + solar total** | | | **about €600 to 1,030** |
 
-A 6S1P pack saves about €150 to 270 and 8 kg. A warm-season LiFePO4 pack (12.8 V, 50 Ah) costs about €150 to 250.
+A 6S1P pack saves about €150 to 270 and 8 kg. Two 6S1P packs instead of one 6S2P add about €60 to 100. A warm-season LiFePO4 pack (12.8 V, 50 Ah) costs about €150 to 250.
 
 ### 9.3 Per kit (shared across stations)
 
@@ -429,11 +438,18 @@ A 6S1P pack saves about €150 to 270 and 8 kg. A warm-season LiFePO4 pack (12.8
 6. **CM4 booting at -30 °C.** Cold-boot tests with and without the pre-heater. Fallback: industrial SoM.
 7. **4G coverage at remote sites.** Log signal quality in the field pilot; directional antenna accessory.
 
-A home freezer only reaches about -18 to -24 °C, so the -30 °C tests need either a rented climate chamber or outdoor tests in January.
+**Cold testing without a chamber:** a chest freezer (about -18 to -25 °C) is enough for early tests of pods, icing and battery discharge. Real -30 °C tests can be done outdoors in central or northern Finland from December to February, logging temperature next to the station. A rented climate chamber (for example at a university or a test lab such as VTT, *(verify availability and cost)*) is needed once, before sale, for a documented -30 °C / +35 °C test.
 
 ---
 
 ## 12. Prototype path (input for step 3)
+
+**How it gets built with a 3D printer and no SMD soldering tools:**
+- **v0 uses only ready-made modules and evaluation boards** with connectors and jumper wires, so no fine soldering is needed.
+- **Custom PCBs are ordered fully assembled** from a PCB assembly service (for example JLCPCB or PCBWay, which place the small QFN chips such as the ADCs and the radio module). Typical cost is about €150 to 300 per board at 5 units *(est.)*, as already in the parts list. Only connectors and cables are fitted by hand.
+- **PCB design** is done in KiCad (free). Claude can write schematics notes, part selections, pin maps and design checks; the layout is done by walto or a freelance PCB designer. This is a decision for step 2.
+- **The 3D printer makes** the mic pod housings, array hub, brackets, cable strain reliefs and the battery box inserts, in ASA (UV- and cold-resistant). PETG is fine for indoor fixtures. Final production parts can move to injection moulding or machining later.
+- **The LTO packs** for prototypes are built from cells with welded or bolted busbars and a commercial BMS. Cells with threaded terminals (bolt-on busbars) avoid needing a spot welder.
 
 - **v0, bench (architecture A):** Raspberry Pi CM4 on the official IO board, TLV320ADC6140 evaluation board, 4 MEMS mic breakouts, GNSS breakout with PPS wired to ADC channel 8, EG25-G USB adapter, lab supply with power logging. Goal: real 4-channel recordings with PPS markers, power measurements, data for the Edge and Cloud threads.
 - **v1, field (architecture B):** custom carrier PCB with recorder MCU, supervisor, ADCs and power tree. Prototype mic pods. 6S1P LTO pack with commercial BMS and Victron MPPT. Goal: 2-week outdoor test, then a 4-week January test.
@@ -447,12 +463,12 @@ For walto:
 
 Answered 2026-11-02: version 1 must count and locate individual birds with multiple stations (section 4.4), power is solar plus battery (section 7), and stations include Bluetooth and Wi-Fi for phone setup (section 6.5).
 
+Answered 2026-11-02 (second round): a 17 kg pack is acceptable but smaller is preferred (section 7.3 now offers two 9 kg packs), Lapland polar night is for a later version (section 7.4), recording is continuous, and walto has a 3D printer (section 12 build plan).
+
 Still open:
 
-1. Is a separate ground-level power pack (about 17 kg for the winter pack) acceptable, or is there a weight limit per station that a user should carry?
-2. Should the kit work in Lapland during the polar night (December to mid-January), or is southern and central Finland enough for winter?
-3. What tools do you have for building: PCB design (KiCad?), reflow or hot-air, 3D printer, any access to a cold chamber?
-4. 4 or 6 mics per station: the prototype will compare both (section 4.4). Is a 1 to 2 mic "Lite" variant for hobbyists still wanted?
+1. Who lays out the PCBs: walto in KiCad, or a freelance PCB designer? (Step 2 decision.)
+2. 4 or 6 mics per station: the prototype will compare both (section 4.4). Is a 1 to 2 mic "Lite" variant for hobbyists still wanted?
 
 For other threads:
 
