@@ -209,6 +209,15 @@ integrity) must not be traded away; savings should come from battery sizing and 
 storage size, shared kit items and volume pricing. If step 2 shows the target cannot be met
 without hurting those claims, the price is revisited rather than the quality.
 
+**Hardware feasibility (`docs/hardware.md` sections 9.4 and 12.2, PR #5):** with one custom carrier
+board built in a series of 50-100, parts are about **€740-1,110 per station with LTO** cells or
+**€630-990 with sodium-ion** cells (sodium-ion must first pass a January cold test), plus
+€600-1,100 per kit in shared items. The target is met with sodium-ion and only at the low end with LTO.
+With pre-made modules (walto's choice for now) parts are about €170-300 higher per station, which
+misses the target. Plan: pre-made modules for prototypes and pilots, then one custom carrier board
+designed by a service before series sales. Pilot kits will therefore cost more to build than the
+series price allows, which is acceptable for a handful of units.
+
 ### Other running costs (est.)
 - 4G data: with continuous recording, the hardware/edge plan uploads one reference channel in FLAC
   (about 8 GB/day, ~240 GB/month per station) plus manifests and clips; the full multichannel
