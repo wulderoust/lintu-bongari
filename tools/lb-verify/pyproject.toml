@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lb-verify"
+version = "0.1.0"
+description = "Reference verifier for lintu-bongari station SD cards (docs/formats.md)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+sig = ["cryptography>=41"]
+test = ["pytest>=7", "cryptography>=41"]
+
+[project.scripts]
+lb-verify = "lb_verify.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
