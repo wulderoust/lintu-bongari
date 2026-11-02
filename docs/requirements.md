@@ -2,7 +2,7 @@
 
 Status: draft for review (step 1 of the plan). Owner: walto. Last updated 2026-11-02.
 
-Decisions from walto (2026-11-02): version 1 counts and locates individual birds using several stations together; consultants and researchers are the first customers, hobbyists come later; kits are sold, not rented; stations are solar plus battery powered; phone setup over Bluetooth or Wi-Fi is allowed; Luontopalvelut Flava (luontopalvelutflava.fi) is a candidate pilot partner.
+Decisions from walto (2026-11-02): version 1 counts and locates individual birds using several stations together; consultants and researchers are the first customers, hobbyists come later; kits are sold, not rented; stations are solar plus battery powered; phone setup over Bluetooth or Wi-Fi is allowed; Luontopalvelut Flava (luontopalvelutflava.fi) is a candidate pilot partner. Later the same day: all three legal uses (YVA, Natura assessments, permit monitoring) are in scope for version 1; stations record continuously; customers own their data; polar night operation in Lapland is out of scope for version 1; SD cards are not encrypted.
 
 This document defines what the bird call kit must do for its buyers, which Finnish survey practices it has to fit, what makes its data trustworthy enough for legal and regulatory reports, and how it handles privacy. Hardware, edge software, cloud and business documents should trace their design choices back to the requirement IDs here (`REQ-…`).
 
@@ -64,7 +64,8 @@ Acoustic recorders are an accepted complement to field surveys, but they do not 
 
 - **REQ-C1 (MUST)** Every count in the app and in reports states its level (presence, activity index, minimum individuals) and the effort it is based on.
 - **REQ-C2 (MUST)** Survey effort is recorded exactly: when each microphone was actually recording, including gaps from power, storage, faults or noise. Without this a "not detected" result means nothing.
-- **REQ-C3 (SHOULD)** Recording schedules matching standard methods are available as presets, for example "breeding season dawn" (from 1 hour before sunrise for 4 hours), "night singers", "continuous", alongside custom schedules. Continuous recording is the default when power allows, because missing data cannot be recovered.
+- **REQ-C3 (MUST)** Stations record continuously, around the clock, on all channels. Missing data cannot be recovered, and continuous data can always be cut to match a standard method afterwards.
+- **REQ-C4 (SHOULD)** Analysis and reports offer time-window presets matching standard methods, for example "breeding season dawn" (from 1 hour before sunrise for 4 hours) or "night singers", applied to the continuous recording.
 
 ### 3.3 Data standards and sensitive species
 
@@ -103,6 +104,7 @@ The goal: for any species claim in a report, anyone can follow it back to the ex
 - **REQ-I2 (MUST)** The station signs a manifest of file hashes with a device private key kept in a secure element. Manifests are chained (each includes the hash of the previous one), so a missing or altered file is detectable.
 - **REQ-I3 (MUST)** Signed manifests (REQ-I2) and status go to the cloud continuously, within an hour of each file closing when 4G is available. This fixes each file's hash in the cloud long before the audio itself arrives, so audio collected later can still be proven unchanged.
 - **REQ-I7 (MUST)** Audio reaches the cloud in tiers, because uploading every channel over 4G is not affordable in power or data (about 35 GB per station per day for 4 channels at 48 kHz/24 bit). Tier 1: one reference channel uploads by default for species ID. Tier 2: the full multichannel archive uploads only when power and coverage allow, or on request for selected time windows. Tier 3: the station's SD cards are the archive of record and are collected at service visits.
+- **REQ-I9 (MUST)** Before the tier 1 upload format is fixed, test whether lossy compression (for example Opus) of the reference channel changes species ID results compared with lossless FLAC, on a Finnish test set. Use the compressed format only if the difference is negligible for all target species; otherwise upload lossless. The archive on SD and any tier 2 upload are always lossless (REQ-A1).
 - **REQ-I8 (MUST)** Every file that reaches the cloud, by 4G or from an SD card, is accepted only after its recomputed hash matches the signed manifest already in the cloud. Mismatches and files missing from the manifest are flagged, not silently accepted. The station never deletes audio it has not had confirmed this way.
 - **REQ-I4 (MUST)** Original audio in the cloud is stored write-once (object lock or equivalent) for the agreed retention period. Any derived file (filtered, redacted, clipped) records the hash of its source.
 - **REQ-I5 (MUST)** Append-only audit log of everything that happens to the data: uploads, analyses, human reviews, edits, exports, deletions, access to raw audio. Each entry has who, what, when.
@@ -119,7 +121,9 @@ The goal: for any species claim in a report, anyone can follow it back to the ex
 
 ### 4.6 Retention
 
-- **REQ-D1 (MUST)** Configurable retention per project. Defaults: original audio kept for the project term plus a set number of years for consultant projects; detection results and audit log kept at least as long as the audio. *(walto to decide default, see questions)*
+- **REQ-D0 (MUST)** The customer owns all data their stations record and everything derived from it. We process it only to provide the service, under a data processing agreement, and never use it for anything else (for example model training) without the customer's explicit opt-in.
+- **REQ-D1 (MUST)** Retention is set by the customer per project. Proposed default when data is hosted in our cloud: original audio, results and audit log are kept for 5 years after the project ends, since YVA and permit decisions can be appealed and monitoring obligations often last several years. The customer is reminded before the period ends and can export, extend or delete. Nothing is deleted automatically without that reminder. Detection results and audit log are kept at least as long as the audio.
+- **REQ-D3 (MUST)** The whole workflow also works without our cloud: a customer can import SD cards and run analysis, review and reports on their own computer, with the same integrity checks (REQ-I8) and model versioning (REQ-R6).
 - **REQ-D2 (MUST)** Customers can export everything (audio, metadata, results, audit log) in open formats and delete their data at the end.
 
 ## 5. Privacy and law
@@ -138,7 +142,8 @@ The stations record everything they hear, including people. In Finland this touc
 - **REQ-P2 (MUST)** Redaction never breaks the chain of custody: the original keeps its hash and write-once status, the redacted copy is a derived file that refers to it (REQ-I4). Policy option: delete the original speech segments after a set period while keeping a record that they were deleted, when and why.
 - **REQ-P3 (MUST)** Guidance and a ready-made sign for the site ("Lintujen äänitallennin / Bird sound recorder", controller contact, purpose), since people in the area must be informed (GDPR Art. 13/14). Hobbyist guidance warns against placing stations aimed at yards, homes or other private spaces.
 - **REQ-P4 (MUST)** Landowner permission is part of the deployment record (REQ-L2). Everyman's rights do not cover leaving equipment in place for weeks.
-- **REQ-P5 (MUST)** All customer data is stored and processed in the EU/EEA. Encryption in transit and at rest. Role-based access per project.
+- **REQ-P5 (MUST)** All customer data is stored and processed in the EU/EEA. Encryption in transit and at rest in the cloud. Role-based access per project.
+- **REQ-P8 (MUST)** SD cards are not encrypted (decision 2026-11-02). Accepted risk: a stolen station or card exposes any recorded speech. Mitigations: the station is locked and position-monitored (REQ-L1), deployment guidance keeps stations away from homes and paths, and customers' DPIA should note this risk.
 - **REQ-P6 (SHOULD)** We provide a data protection impact assessment (DPIA) template for consultant customers.
 - **REQ-P7 (MUST)** Sensitive species locations are protected as in REQ-S2. This is a nature protection matter, not GDPR, but it uses the same access control.
 
@@ -146,7 +151,7 @@ The stations record everything they hear, including people. In Finland this touc
 
 These are summarised here because they decide whether data exists at all. The hardware and edge software documents set the detailed specs.
 
-- **REQ-O1 (MUST)** Unattended operation for 28 days with continuous recording on all channels, in temperatures from -30 °C to +35 °C, through snow, rain and icing, powered by solar panel plus battery. The power budget must hold through the darkest Finnish winter weeks, where solar input is close to zero in the north. Data loss from a full battery or storage must not happen silently.
+- **REQ-O1 (MUST)** Unattended operation for 28 days with continuous recording on all channels, in temperatures from -30 °C to +35 °C, through snow, rain and icing, powered by solar panel plus battery. The power budget must hold through the darkest winter weeks in southern and central Finland. Operation in Lapland during the polar night, with no solar input, is out of scope for version 1 and planned for a later version. Battery pack size and weight should be as small as the power budget allows (walto accepts up to about 17 kg per station, but smaller is preferred). Data loss from a full battery or storage must not happen silently.
 - **REQ-O2 (MUST)** Station keeps recording when 4G is down and catches up manifest, status and tier 1 uploads when the connection returns. Local storage holds the whole deployment's full multichannel audio, since the SD cards are the archive of record (REQ-I7).
 - **REQ-O3 (MUST)** Remote status at least every hour when connected: recording state, battery, storage, temperature, GNSS lock, microphone health, last upload.
 - **REQ-O4 (MUST)** Remote configuration changes (schedule, gain) are logged in the audit log and take effect at a recorded time, so effort stays traceable.
@@ -164,11 +169,6 @@ These are summarised here because they decide whether data exists at all. The ha
 
 ## 8. Open questions for walto
 
-Answered on 2026-11-02: individual counting (yes, across stations), first customers (consultants and researchers), sales model (sell), power (solar plus battery), phone setup (yes), pilot partner (Luontopalvelut Flava).
+All questions from the first round are answered (2026-11-02). Retention had no preference, so REQ-D1 proposes 5 years after project end as the default; walto can change it.
 
-Still open:
-
-1. Which legal use comes first: wind farm YVA surveys, Natura assessments, or permit monitoring? This sets the report template and which species need validated performance first.
-2. How long should raw audio be kept by default (for example 5 years for consultant projects)? This drives cloud storage cost.
-3. Continuous recording around the clock, or scheduled windows by default? Continuous gives the best data but costs winter power.
-4. Should our cloud host customer data (we become a processor with a DPA), or should consultants also be able to keep everything on their own machines only?
+New questions will be added here during the architecture step.
