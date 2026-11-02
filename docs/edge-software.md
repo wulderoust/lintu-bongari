@@ -2,7 +2,7 @@
 
 Status: **Draft for step 1 (design)**. No code yet. Decisions marked **[Proposed]** need walto's review; items marked **[Open]** are waiting on answers or on another doc. Requirement IDs (REQ-…) refer to `docs/requirements.md` (PR #1). Hardware references (§x.y of hardware) refer to `docs/hardware.md` (PR #5). See §18 for traceability.
 
-**Decided by walto (2026-11-02):** version 1 must **count and locate individual birds across multiple stations**; stations use **solar plus battery**; **Bluetooth/Wi-Fi phone setup** is included. These shape §7.3, §8.3, §9.1 and §14.
+**Decided by walto (2026-11-02):** version 1 must **count and locate individual birds across multiple stations**; stations use **solar plus battery**; **Bluetooth/Wi-Fi phone setup** is included; stations **record continuously**; **SD cards are not encrypted**; **the customer owns the data**. These shape §6.1, §7.3, §8.3, §9, §12 and §14.
 
 This version follows the hardware doc's **architecture B**: a low-power recorder MCU records around the clock, and a Linux module wakes only when needed. Prototype v0 is architecture A (Linux records everything), and the software is split so that v0 work carries over (§16).
 
@@ -129,7 +129,7 @@ From hardware §5.3: about 35 GB/day for 4 channels (about 1 TB per 28 days), ab
 
 ### 6.1 Recording profiles
 
-Profiles are config, selectable per deployment from the app (REQ-C3):
+**Continuous recording is the product default (decided by walto).** The other profiles stay available as options for special cases such as a long low-power deployment, and per REQ-C3:
 
 - **Continuous** 24/7 (default).
 - **Sun-based** windows from the station's GNSS position: e.g. "breeding season dawn" from 1 h before sunrise for 4 h, dusk windows. Polar day and polar night fall back to fixed clock windows when the sun event does not occur.
@@ -203,7 +203,7 @@ When Linux is up, `lb-detector` processes ingested files it has not seen yet:
 - **Noise and weather flags:** rain, wind, anthropogenic noise (traffic, aircraft, chainsaws) from spectral flatness, low-frequency energy and coherence.
 - **Per-minute acoustic indices** (e.g. ACI, NDSI) for the app's activity heatmap.
 
-The output is an event index used to prioritise uploads (§9.1) and to pick events for localisation (§8.3) and to answer "anything interesting here?" before the full data arrives. It flags, it never deletes. CPU cost: a few minutes of CM4 time per day of audio *(est., confirm in v0)*. Thresholds are config.
+The output is an event index used to prioritise uploads (§9.1), to pick events for localisation (§8.3), and to answer "anything interesting here?" before the full data arrives. It flags, it never deletes. CPU cost: a few minutes of CM4 time per day of audio *(est., confirm in v0)*. Thresholds are config.
 
 Speech detection (REQ-P1) runs in the cloud on whatever is uploaded; see §18.
 
@@ -226,21 +226,52 @@ Per project config, in priority order:
 
 1. **Always, via the supervisor (Linux off):** hourly status, alarms, the current chain head.
 2. **Always, at each Linux wake:** all new signed manifest entries and sidecars, health summaries and the event index (kilobytes to a few MB per day). The cloud then knows exactly which files exist and can verify any file that arrives later (REQ-I2, REQ-I3).
-3. **Default audio:** one **reference channel in FLAC** (about 8 GB/day) for cloud species ID, lossless so cloud and local results stay identical (REQ-A1, REQ-R*). Under a tight data or energy budget, the project can choose Opus at ~64-96 kbit/s instead (about 1 GB/day), marked as a listening/ID copy, never the archive.
+3. **Default audio (recommended, see §9.2):** one **reference channel as Opus at 96 kbit/s** for the whole recording (about 1 GB/day) for live cloud species ID and listening, **plus that channel in lossless FLAC for every detected event window** (about 0.5-1.5 GB/day *(est.)*, depends on activity). A project can switch to full lossless reference (about 8 GB/day) when power and data allow, e.g. summer with solar and an unlimited SIM.
 4. **On demand / localisation:** multichannel clips the cloud requests for cross-station localisation (§8.3), and time ranges requested from the app.
 5. **When power and coverage allow:** the full multichannel archive, oldest first.
 6. **At service visit:** the SD cards are ingested in the cloud and every file is verified against the signed chain.
 
 A **daily data and energy budget** caps 3-5 (set from the SIM plan and battery state). Items wait when the budget is used up.
 
-### 9.2 Transport
+### 9.2 Lossless vs compressed upload: comparison and recommendation
+
+walto asked whether lossless upload is worth it. Short answer: **not for the continuous live stream; yes for event clips and localisation.**
+
+| | Lossless FLAC reference | Opus 96 kbit/s reference | Recommended hybrid |
+|---|---|---|---|
+| Data per station per month | ~240 GB | ~30 GB | ~45-75 GB *(est.)* |
+| Upload energy per day *(at ~0.5 Wh/GB, good signal)* | ~4 Wh (~110 Wh per 28 days, ~15 % of the winter pack's usable energy) | ~0.5 Wh | ~1-1.5 Wh |
+| Upload time per day at a weak site (~2 Mbit/s) | ~9 h of modem time | ~1.2 h | ~2-3 h |
+| Species ID accuracy | Reference | Close to lossless at ≥96 kbit/s for common classifiers; faint, distant and high-pitched calls are the first to suffer at lower bitrates *(verify with our own test set in v0)* | Lossless on every window where a bird was detected |
+| Cross-station localisation | Usable | **Not usable**: lossy codecs alter fine timing and phase between channels | Localisation always uses lossless multichannel clips (§8.3) |
+| Legal / archive (REQ-A1) | Archive is the SD card either way | Same | Same |
+| Cloud and local results identical (REQ-R) | Yes | Only if both run on the same Opus copy | Final report results are computed on lossless audio (event clips now, full archive after SD ingest); live results on Opus are labelled preliminary |
+
+Why the hybrid:
+
+- Most of a 24 h stream is silence, wind and rain. Paying 8 GB/day to move it losslessly buys almost nothing for ID, because what matters (the calls) is already sent lossless as event clips.
+- Localisation, which walto chose for v1, cannot use lossy audio at all, so it needs its own lossless multichannel clips regardless of the reference stream format.
+- The full lossless archive is always on the SD cards and ingested after the service visit, so nothing is lost for re-analysis or legal use.
+- 240 GB/month per station times 4-20 stations is a real SIM cost and doubles winter upload energy; the hybrid keeps a 4-station kit around 200-300 GB/month in total.
+
+Risk to check in v0: the event detector must not miss quiet calls; if it does, faint birds would only exist in the Opus stream until SD ingest. Test: run the classifier on the same recordings as FLAC, Opus 96 kbit/s and Opus 64 kbit/s, and measure detector recall for faint calls.
+
+### 9.3 Customer-owned data
+
+The customer owns the data (decided by walto). On the station side this means:
+
+- Uploads go only to the **customer's own project**; we do not use customer audio for anything else without a separate written agreement.
+- A per-project **local-only mode**: the station uploads only status, health and the signed manifest chain (needed so integrity can be proven later), and no audio. The customer collects the SD cards and analyses on their own computer.
+- SD cards are plain exFAT FLAC + sidecars + chain files, readable without our software, so customers are never locked in (REQ-D2).
+
+### 9.4 Transport
 
 - **HTTPS with resumable chunked upload** (S3-compatible multipart via pre-signed URLs, or tus; decided with the Cloud doc). Interrupted chunks resume.
 - **Content-addressed:** objects are named by SHA-256, so retries never duplicate and the cloud verifies on arrival. Only cloud-verified objects are marked received (REQ-I3).
 - **TLS with a per-device client certificate** whose key is in the secure element.
 - No inbound connections (carrier NAT); everything is outbound: MQTT, HTTPS, WireGuard.
 
-### 9.3 Outages
+### 9.5 Outages
 
 The upload queue lives in SQLite on the Linux eMMC; the source data is on the SD cards, so nothing needs to be buffered twice. If 4G is down for days, the recorder just keeps writing; the next window resumes in priority order (status and manifests first). The supervisor's hourly status is queued in its own RAM/flash and sent when the modem reconnects.
 
@@ -337,12 +368,13 @@ Because the file format, chain and Linux daemons are the same in v0 and v1, ever
 | REQ-C3 presets, continuous default | §6.1 |
 | REQ-I1 SHA-256 at file close | §4.1, §10 |
 | REQ-I2 signed chained manifests, key in secure element | §10 |
-| REQ-I3 cloud verifies before local delete | §5.2, §9.2; upload scope per §9.1 (agreed with hardware §6.4; requirements wording to be aligned) |
+| REQ-I3 cloud verifies before local delete | §5.2, §9.4; upload scope per §9.1 (agreed with hardware §6.4; requirements wording to be aligned) |
 | REQ-I5 audit log (station side) | §10 non-audio entries |
 | REQ-P1 speech detection | Cloud, on uploaded audio. SD cards collected at service visits are ingested through the same pipeline. An on-device speech flag to hold back clips is possible later on Linux. |
-| REQ-P5 encryption in transit / at rest | §9.2 TLS; at-rest encryption of SD cards **[Open: conflicts with "readable on any PC" and with key handling at service visits]** |
+| REQ-P5 encryption in transit / at rest | §9.4 TLS. SD cards are **not encrypted** (walto's decision), so cards stay readable on any PC; lost-card risk is handled by physical security and site signage (REQ-P3). Requirements doc to note this. |
 | REQ-O1 28 days continuous, -30 °C, no silent loss | §2 architecture B, §5.2 two cards, §6.3, §15 |
-| REQ-O2 record when 4G down, catch up | §9.3 |
+| REQ-O2 record when 4G down, catch up | §9.5 |
+| REQ-D2 export, customer owns data | §9.3 |
 | REQ-O3 hourly status | §11 via supervisor |
 | REQ-O4 config changes logged with effective time | §12 |
 | REQ-O5 1-20+ stations | Nothing station-to-station on the device; fleet handled in cloud (§12, §13) |
@@ -350,7 +382,9 @@ Because the file format, chain and Linux daemons are the same in v0 and v1, ever
 
 ## 19. Open questions for walto
 
-Answered: multi-mic purpose (locate across stations), power (solar + battery), phone setup (yes), Linux module (CM4). Remaining:
+All questions from this doc are answered (2026-11-02): locate across stations, solar + battery, phone setup via BLE/Wi-Fi, CM4, continuous recording, no SD encryption, customer owns the data. The upload format is the hybrid recommended in §9.2 unless walto prefers otherwise.
 
-1. **Upload default:** is one lossless reference channel (about 8 GB/day, ~240 GB/month per station) acceptable for the SIM cost, or should the default be compressed (about 1 GB/day) with lossless on demand?
-2. **SD card encryption:** do consultants need cards encrypted (protects speech recordings if a card is lost, REQ-P5), accepting that cards are then only readable with our tool?
+Still to settle with other threads:
+
+- **Hardware:** SD mux for idle-card handover (§5.2); CM4 variant with Wi-Fi and a BLE part on the supervisor (§14); whether the GNSS module gives raw measurements (§7.3).
+- **Cloud:** upload protocol (S3 multipart vs tus), coordinated clip requests for localisation (§8.3), local-only project mode (§9.3).
